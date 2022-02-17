@@ -1,0 +1,14 @@
+/* get details for one event interaction*/
+/* input:  interaction id
+   output: name, time, sender, text, status, category
+*/
+CREATE PROC getInteractionInfo ( @interactionID numeric(10,0) )
+AS
+BEGIN
+  SELECT name, time, senderName, text, status, category
+    FROM eventInteractions ( INDEX interactionsByEventIdx ), interactionsAllowed
+    WHERE interactionID = @interactionID AND
+          eventInteractions.eventID = interactionsAllowed.eventID AND
+          eventInteractions.interactionType = interactionsAllowed.interactionType
+END
+GO

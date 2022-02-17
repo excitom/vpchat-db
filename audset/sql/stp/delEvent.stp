@@ -1,0 +1,30 @@
+/* delete an event from the database, with all related data */
+/* NOTE: event must NOT be active */
+/* input:  event id
+   output: error 20001 if event is active
+*/
+CREATE PROC delEvent ( @eventID numeric(10,0) )
+AS
+BEGIN
+  DECLARE @currentState integer
+  BEGIN TRAN
+    SELECT @currentState = currentState
+      FROM events
+      WHERE eventID = @eventID
+    
+    IF ( @currentState IS NOT NULL ) AND
+       ( @currentState <> 3 ) AND ( @currentState <> 0 )
+    BEGIN
+      /* can't delete active event */
+      ROLLBACK TRAN
+      RETURN 20001
+    END
+
+    /* NOTE: deletion of event will fire a trigger
+             that will delete related data */
+    DELETE events
+      WHERE eventID = @eventID
+
+  COMMIT TRAN
+END
+GO

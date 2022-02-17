@@ -1,0 +1,22 @@
+/* Clear from database all records for all events */
+CREATE PROC clearEvents
+AS
+BEGIN
+  
+  /* tables depending on eventVotes */
+  TRUNCATE TABLE userVotes
+  TRUNCATE TABLE voteOptions
+  
+  /* tables depending on eventInteractions */
+  TRUNCATE TABLE answers
+  
+  /* tables depending on events */
+  TRUNCATE TABLE interactionsAllowed
+  TRUNCATE TABLE eventInteractions
+  TRUNCATE TABLE hosts
+  TRUNCATE TABLE eventInvitees
+  TRUNCATE TABLE eventState
+  
+  TRUNCATE TABLE events
+END
+GO

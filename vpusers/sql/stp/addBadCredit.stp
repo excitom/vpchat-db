@@ -1,0 +1,69 @@
+/* add a credit card or bank account to the bad credit list
+   input:  ccID/edID
+           accountID
+	   type - 2=credit, 3=echeck
+	   comment
+
+   output: Return value - 0 - success 
+		 	  20000 - Duplicate (comment updated)
+
+*/
+CREATE PROC addBadCredit ( 
+	@ccID		userIdentifier,
+	@accountID	userIdentifier,
+	@type		tinyint,
+	@comment	VARCHAR(255)
+)
+AS
+BEGIN
+  DECLARE @lastError	int
+  DECLARE @rc		int
+
+  BEGIN TRAN
+    
+    IF EXISTS( SELECT * FROM badCredit WHERE ccID = @ccID AND type = @type )
+    BEGIN
+      UPDATE badCredit
+        SET comment = @comment
+        WHERE ccID = @ccID
+        AND type = @type
+   
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+
+      SELECT @rc = 20000
+    END
+    ELSE BEGIN
+
+      INSERT INTO badCredit ( ccID, type, comment )
+        VALUES (@ccID, @type, @comment )
+       
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+
+      SELECT @rc = 0
+    END
+  COMMIT TRAN
+
+  /*
+   * add a history record
+   */
+  DECLARE @reason integer
+  SELECT @reason = 30
+  IF @type = 3
+  BEGIN
+    SELECT @reason = 31
+  END
+  EXEC addAcctHistory @accountID, @reason, @ccID
+
+  RETURN @rc
+END
+GO

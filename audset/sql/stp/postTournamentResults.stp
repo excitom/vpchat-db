@@ -1,0 +1,753 @@
+/*
+ * Update a tournament bracket with game results.
+ *
+ * The procedure is called from postResultsCommon when it is determined
+ * that both players are in the same ladder. Now we need to scan for
+ * any in-progress tournaments for this ladder. For any that we find,
+ * see if the two players are paired in the same round, and that round
+ * is the current round, and the tournament state is appropriate.
+ *
+ * Normally the only appropriate tournament state is "in progress" but
+ * if the tournament director is declaring winners for abandoned games
+ * then the state can be "between rounds". The input mask parameter
+ * defines the allowable states, which are bits in the mask.
+ * 0x02 = in progress
+ * 0x20 = between rounds
+ *
+ * Player won/lost/tied stats are updated for the tournament if the
+ * type is Round Robin or Swiss, since the stats determine the winner.
+ *
+ * Input: Ladder ID, status mask, winner ID, loser ID
+ *
+ */
+IF EXISTS
+ (SELECT name FROM sysobjects WHERE name = 'postTournamentResults' AND type = 'P') 
+ DROP PROC postTournamentResults
+GO  
+CREATE PROC postTournamentResults (
+  @notifyID	userIdentifier,
+  @mask		tinyint,
+  @tie          bit,
+  @winnerID	userIdentifier,
+  @player1	VPuserID,
+  @loserID	userIdentifier,
+  @player2	VPuserID,
+  @winnerID2	userIdentifier = NULL,
+  @teamMate1	VPuserID = NULL,
+  @loserID2	userIdentifier = NULL,
+  @teamMate2	VPuserID = NULL
+)
+AS
+BEGIN
+  DECLARE @lastError    integer
+  DECLARE @tournID      userIdentifier
+  DECLARE @round        integer
+  DECLARE @finalRound   integer
+  DECLARE @type         tinyint
+  DECLARE @status       tinyint
+  DECLARE @bracketType	tinyint
+  DECLARE @gameNum      smallint
+  DECLARE @seed 	tinyint
+  DECLARE @tempID	userIdentifier
+  DECLARE @tempName	VPuserID
+  DECLARE @over		int
+  DECLARE @games	int
+  DECLARE @gamesPlayed	int
+
+  DECLARE @MsgGameResults	int
+  SELECT  @MsgGameResults	= 0
+  DECLARE @MsgRoundEnded	int
+  SELECT  @MsgRoundEnded	= 1
+  DECLARE @MsgTournEnded	int
+  SELECT  @MsgTournEnded	= 2
+  DECLARE @MsgRoundStarted	int
+  SELECT  @MsgRoundStarted	= 3
+  DECLARE @MsgCancelled		int
+  SELECT  @MsgCancelled		= 4
+  DECLARE @MsgPrizeAwarded	int
+  SELECT  @MsgPrizeAwarded	= 5
+  DECLARE @MsgRoundEndedCmplt	int
+  SELECT  @MsgRoundEndedCmplt	= 6
+  DECLARE @MsgSwissTie		int
+  SELECT  @MsgSwissTie		= 7
+  DECLARE @MsgRegistered	int
+  SELECT  @MsgRegistered 	= 8
+  DECLARE @MsgQuit		int
+  SELECT  @MsgQuit 		= 9
+  DECLARE @MsgRemoved		int
+  SELECT  @MsgRemoved 		= 10
+
+  SELECT @over = 0
+
+  DECLARE tourneyCursor CURSOR
+    FOR SELECT tournID, currentRound, type, status
+      FROM tournaments
+      WHERE notifyID = @notifyID
+      AND   (status & @mask != 0)
+
+  /* Check all in progress tournaments for this ladder */
+
+  OPEN tourneyCursor
+  FETCH tourneyCursor INTO @tournID, @round, @type, @status
+  WHILE ( @@sqlstatus = 0 ) 
+  BEGIN
+    /*
+     * If this is a team game, 4 players were input. One
+     * person on each team is the "primary" player, the one
+     * who signed up for the tournament first. We need to
+     * figure out which one this is, since the primary player's
+     * user ID is used throughout the tournament brackets.
+     *
+     * The games report results based on the seats at the table.
+     * Teammates are in slots 1 and 3, 2 and 4. We do not know
+     * if the person who signed up the team sat in slot 1 or 2,
+     * so some juggling might be required.
+     */
+    IF @winnerID2 IS NOT NULL AND @loserID2 IS NOT NULL
+    BEGIN
+      IF EXISTS (SELECT * FROM tournamentPlayers
+        WHERE userID = @winnerID2 AND tournID = @tournID AND td = 0)
+      BEGIN
+        SELECT @tempID = @winnerID
+        SELECT @winnerID = @winnerID2
+        SELECT @winnerID2 = @tempID
+
+        SELECT @tempName = @player1
+        SELECT @player1 = @teamMate1
+        SELECT @teamMate1 = @tempName
+      END
+      IF EXISTS (SELECT * FROM tournamentPlayers
+        WHERE userID = @loserID2 AND tournID = @tournID AND td = 0)
+      BEGIN
+        SELECT @tempID = @loserID
+        SELECT @loserID = @loserID2
+        SELECT @loserID2 = @tempID
+
+        SELECT @tempName = @player2
+        SELECT @player2 = @teamMate2
+        SELECT @teamMate2 = @tempName
+      END
+    END
+
+    /* Is player 1 involved in this round of the tournament ? */
+
+    SELECT @gameNum = NULL
+    SELECT @bracketType = bracketType, @gameNum = gameNum
+      FROM brackets
+      WHERE tournID = @tournID
+      AND     round = @round
+      AND    player = @winnerID
+
+    IF @gameNum IS NULL
+    BEGIN
+      FETCH tourneyCursor INTO @tournID, @round, @type, @status
+      CONTINUE			-- not in this tournament
+    END
+
+-- select 'round', @round, 'game', @gameNum, 'bracketType', @bracketType, @loserID
+
+    /* Is player 2 involved in the same game in the same round
+     * of the same tournament ? 
+     */
+    IF EXISTS( SELECT * FROM brackets
+                 WHERE   tournID = @tournID
+                 AND       round = @round
+                 AND      player = @loserID
+                 AND bracketType = @bracketType
+                 AND     gameNum = @gameNum )
+    BEGIN
+
+      /*
+       * Was a winner already posted for this game?
+       */
+      IF EXISTS( SELECT * FROM brackets
+                   WHERE   tournID = @tournID
+                   AND       round = @round
+                   AND bracketType = @bracketType
+                   AND     gameNum = @gameNum
+                   AND      winner = 1)
+      BEGIN
+        FETCH tourneyCursor INTO @tournID, @round, @type, @status
+        CONTINUE
+      END
+
+      BEGIN TRAN
+
+        /* If this is a Round Robin or Swiss style tournament, update
+         * won/lost stats since these are used to determine a winner.
+         */
+        IF @type = 0x04 OR @type = 0x08
+        BEGIN
+          IF @tie = 1
+          BEGIN
+            UPDATE tournamentPlayers
+              SET tied = tied + 1
+              WHERE tournID = @tournID
+              AND   (userID = @winnerID OR userID = @loserID)
+              AND        td = 0
+
+            SELECT @lastError = @@error
+            IF @lastError != 0
+            BEGIN
+              ROLLBACK TRAN
+              RETURN @lastError
+            END
+          END
+          /* Not a tie */
+          ELSE BEGIN
+            UPDATE tournamentPlayers
+              SET won = won + 1
+              WHERE tournID = @tournID
+              AND    userID = @winnerID
+              AND        td = 0
+ 
+            SELECT @lastError = @@error
+            IF @lastError != 0
+            BEGIN
+              ROLLBACK TRAN
+              RETURN @lastError
+            END
+
+            UPDATE tournamentPlayers
+              SET lost = lost + 1
+              WHERE tournID = @tournID
+              AND    userID = @loserID
+              AND        td = 0
+ 
+            SELECT @lastError = @@error
+            IF @lastError != 0
+            BEGIN
+              ROLLBACK TRAN
+              RETURN @lastError
+            END
+          END
+        END	-- Swiss or Round Robin
+
+        /* Update the winner and loser for this game */
+
+        UPDATE brackets
+        SET winner = 0
+        WHERE tournID = @tournID
+        AND     round = @round
+        AND    player = @loserID
+
+        SELECT @lastError = @@error
+        IF @lastError != 0
+        BEGIN
+          ROLLBACK TRAN
+          RETURN @lastError
+        END
+
+        UPDATE brackets
+        SET winner = 1
+        WHERE tournID = @tournID
+        AND     round = @round
+        AND    player = @winnerID
+
+        SELECT @lastError = @@error
+        IF @lastError != 0
+        BEGIN
+          ROLLBACK TRAN
+          RETURN @lastError
+        END
+
+        /* Propagate the winner to next bracket */
+
+        DECLARE @nextRound tinyint
+        SELECT @nextRound = @round + 1
+        IF EXISTS (SELECT * FROM brackets
+                     WHERE   tournID = @tournID
+                     AND       round = @nextRound
+                     AND bracketType = @bracketType)
+        BEGIN
+
+          /* Single or Double Elimination */
+
+          IF @type = 0x01 OR @type = 0x02
+          BEGIN
+            /* If this is a Double Elimination tournament and we're in
+             * the final bracket special handling is needed.
+             * - If the top ranked player won, there's no need for the
+             *   next round.
+             * - If the lower ranked player won, put both players into
+             *   the next round.
+             */
+            IF @type = 0x02 AND @bracketType = 2
+            BEGIN
+              SELECT @seed = seed
+                FROM brackets
+                WHERE   tournID = @tournID
+                AND       round = @round
+                AND      player = @winnerID
+                AND bracketType = @bracketType
+
+              SELECT @lastError = @@error
+              IF @lastError != 0
+              BEGIN
+                ROLLBACK TRAN
+                RETURN @lastError
+              END
+
+              /* The top ranked player won, tournament over. */
+
+              IF @seed = 1
+              BEGIN
+                UPDATE brackets
+                  SET player = 0
+                  WHERE tournID = @tournID
+                  AND     round = @nextRound
+
+                EXEC @lastError = updateTournament @tournID, 0x04
+                IF @@trancount = 0 OR @lastError != 0
+                BEGIN
+                  IF @@trancount > 0
+                    ROLLBACK TRAN
+                  RETURN @lastError
+                END
+                SELECT @over = 1
+              END
+
+              /* The lower ranked player won, final round needed. */
+
+              ELSE BEGIN
+                UPDATE brackets
+                  SET player = @winnerID
+                  WHERE tournID = @tournID
+                  AND     round = @nextRound
+                  AND      seed = 1
+                UPDATE brackets
+                  SET player = @loserID
+                  WHERE tournID = @tournID
+                  AND     round = @nextRound
+                  AND      seed = 2
+              END
+
+              SELECT @lastError = @@error
+              IF @lastError != 0
+              BEGIN
+                ROLLBACK TRAN
+                RETURN @lastError
+              END
+            END
+
+            /* Not in the Finals of a Double Elimination tournament.
+             * Propagate the winner to the next round. Note: The
+             * winner may be in the losers bracket, but processing
+             * is the same as for the winners bracket.
+             */
+
+            ELSE BEGIN
+              SELECT @seed = min(seed)
+                FROM brackets
+                WHERE   tournID = @tournID
+                AND       round = @round
+                AND     gameNum = @gameNum
+                AND bracketType = @bracketType
+
+              SELECT @lastError = @@error
+              IF @lastError != 0
+              BEGIN
+                ROLLBACK TRAN
+                RETURN @lastError
+              END
+
+-- select 'WINNER', @winnerID, 'seed', @seed, 'round', @nextRound
+              UPDATE brackets
+                SET player = @winnerID
+                WHERE tournID = @tournID
+                AND     round = @nextRound
+                AND      seed = @seed
+
+              SELECT @lastError = @@error
+              IF @lastError != 0
+              BEGIN
+                ROLLBACK TRAN
+                RETURN @lastError
+              END
+            END     -- double elimination tournament
+          END       -- single or double elim
+
+          /* Round Robin or Swiss.
+           * Both the winner and loser advance to the next round.
+           */
+          ELSE BEGIN
+            SELECT @seed = seed
+              FROM brackets
+                WHERE tournID = @tournID
+                AND     round = @round
+                AND    player = @winnerID
+
+            SELECT @lastError = @@error
+            IF @lastError != 0
+            BEGIN
+              ROLLBACK TRAN
+              RETURN @lastError
+            END
+
+-- select 'RR OR SWISS WINNER', @winnerID, 'seed', @seed, 'round', @nextRound
+            UPDATE brackets
+              SET player = @winnerID
+              WHERE tournID = @tournID
+              AND     round = @nextRound
+              AND      seed = @seed
+
+            SELECT @lastError = @@error
+            IF @lastError != 0
+            BEGIN
+              ROLLBACK TRAN
+              RETURN @lastError
+            END
+
+            SELECT @seed = seed
+              FROM brackets
+                WHERE tournID = @tournID
+                AND     round = @round
+                AND    player = @loserID
+
+            SELECT @lastError = @@error
+            IF @lastError != 0
+            BEGIN
+              ROLLBACK TRAN
+              RETURN @lastError
+            END
+
+-- select 'RR OR SWISS LOSER', @loserID, 'seed', @seed, 'round', @nextRound
+            UPDATE brackets
+              SET player = @loserID
+              WHERE tournID = @tournID
+              AND     round = @nextRound
+              AND      seed = @seed
+
+            SELECT @lastError = @@error
+            IF @lastError != 0
+            BEGIN
+              ROLLBACK TRAN
+              RETURN @lastError
+            END
+          END      -- Swiss or Round Robin
+        END        -- There is a next (winners) bracket
+
+        /* There aren't any more winners brackets */
+
+        ELSE BEGIN
+-- select 'No more winners brackets', @round
+          /* If Double Elimination tournament, may need to propagate
+           * the winner to the finals bracket.
+           */
+          IF @type = 0x02
+          BEGIN
+            SELECT @seed = min(seed)
+              FROM brackets
+              WHERE   tournID = @tournID
+              AND       round = @round
+              AND     gameNum = @gameNum
+              AND bracketType = @bracketType
+
+            SELECT @lastError = @@error
+            IF @lastError != 0
+            BEGIN
+              ROLLBACK TRAN
+              RETURN @lastError
+            END
+
+            SELECT @finalRound = NULL
+            SELECT @finalRound = min(round)
+              FROM brackets
+              WHERE   tournID = @tournID
+              AND        seed = @seed
+              AND bracketType = 2
+            IF @finalRound IS NOT NULL
+            BEGIN
+-- select 'FINALS', @winnerID, 'seed', @seed, 'round', @finalRound
+              UPDATE brackets
+                SET player = @winnerID
+                WHERE tournID = @tournID
+                AND     round = @finalRound
+                AND      seed = @seed
+
+              SELECT @lastError = @@error
+              IF @lastError != 0
+              BEGIN
+                ROLLBACK TRAN
+                RETURN @lastError
+              END
+            END    -- There is a finals bracket
+          END      -- Double elimination tournament
+        END        -- No more winners brackets
+
+        /* If this is a Double Elimination tournament, and
+         * the loser was in the winners bracket, send him
+         * to the losers bracket for the next round.
+         *
+         * Depending on the size of the field, this player may
+         * not play in the losers bracket until a later round.
+         */
+-- select 'look for losers', @type, @bracketType
+
+        IF @type = 0x02 AND @bracketType = 0
+        BEGIN
+-- select 'looking for loser seed, round', @round, 'game', @gameNum
+          SELECT @seed = max(seed)
+            FROM brackets
+            WHERE   tournID = @tournID
+            AND       round = @round
+            AND     gameNum = @gameNum
+            AND bracketType = 0
+
+          SELECT @lastError = @@error
+          IF @lastError != 0
+          BEGIN
+            ROLLBACK TRAN
+            RETURN @lastError
+          END
+
+          WHILE (EXISTS (SELECT * FROM brackets
+                          WHERE   tournID = @tournID
+                          AND       round = @nextRound
+                          AND bracketType = 1))
+          BEGIN
+            IF EXISTS (SELECT * FROM brackets
+                         WHERE   tournID = @tournID
+                         AND       round = @nextRound
+                         AND        seed = @seed
+                         AND bracketType = 1)
+            BEGIN
+-- select 'LOSER', @loserID, 'seed', @seed, 'round', @nextRound
+              UPDATE brackets
+                SET player = @loserID
+                WHERE tournID = @tournID
+                AND     round = @nextRound
+                AND      seed = @seed
+
+              SELECT @lastError = @@error
+              IF @lastError != 0
+              BEGIN
+                ROLLBACK TRAN
+                RETURN @lastError
+              END
+              BREAK
+            END
+            SELECT @nextRound = @nextRound + 1
+          END      -- look forward through losers brackets
+        END        -- loser from the winners bracket
+
+        /*
+         * Determine if the round is over
+         */
+        IF @over = 0	-- no need to check if we already determined
+        BEGIN		-- that the tournament is over.
+-- select 'CHECK IF ROUND ENDED', @tournID, @bracketType
+
+          SELECT @games = max(gameNum)	-- get number of games, this round
+                 FROM brackets
+                 WHERE tournID = @tournID
+                 AND bracketType = @bracketType
+                 AND round IN (SELECT currentRound
+                                 FROM tournaments
+                                 WHERE tournID = @tournID)
+          SELECT @gamesPlayed = COUNT(*)  -- get finished games, this round
+                 FROM brackets
+                 WHERE tournID = @tournID
+                 AND winner = 1
+                 AND bracketType = @bracketType
+                 AND round IN (SELECT currentRound
+                                 FROM tournaments
+                                 WHERE tournID = @tournID)
+          IF @games = @gamesPlayed
+          BEGIN
+-- select 'all games played this round, bracket type', @bracketType
+            /*
+             * If double elim, a round may consist of games in both
+             * winner and loser brackets.
+             */
+            IF @type = 0x02 AND (@bracketType = 0 OR @bracketType = 1)
+            BEGIN
+              DECLARE @obt tinyint	-- other bracket type
+              SELECT @obt = 1 - @bracketType
+-- select 'check other bracket type', @obt
+              SELECT @games = max(gameNum)
+                     FROM brackets
+                     WHERE tournID = @tournID
+                     AND bracketType = @obt
+                     AND round IN (SELECT currentRound
+                                     FROM tournaments
+                                     WHERE tournID = @tournID)
+              SELECT @gamesPlayed = COUNT(*)
+                     FROM brackets
+                     WHERE tournID = @tournID
+                     AND winner = 1
+                     AND bracketType = @obt
+                     AND round IN (SELECT currentRound
+                                     FROM tournaments
+                                     WHERE tournID = @tournID)
+              IF @games IS NULL OR (@games = @gamesPlayed)
+              BEGIN
+                SELECT @over = 2
+-- select 'all games over, other bracket', @over
+              END
+            END
+            ELSE BEGIN
+              SELECT @over = 2
+            END
+          END
+
+-- select 'OVER?', @over
+          /*
+           * Determine if the tournament is over
+           */
+          IF @bracketType = 2
+          OR (@bracketType = 0 AND (@type != 0x02))
+          BEGIN
+            IF @over = 2		-- round over
+            AND ((SELECT currentRound	-- and this is the last round
+                   FROM tournaments
+                   WHERE tournID = @tournID)
+               = (SELECT max(round)
+                   FROM brackets
+                   WHERE tournID = @tournID))
+            BEGIN
+-- select 'TOURNAMENT OVER', @tournID
+              EXEC updateTournament @tournID, 0x04
+              IF @@trancount = 0 OR @lastError != 0
+              BEGIN
+                IF @@trancount > 0
+                  ROLLBACK TRAN
+                RETURN @lastError
+              END
+              SELECT @over = 1
+            END      -- Tournament is over since all games played
+
+            /* If Swiss style, tournament ends early if every
+             * player has at least one loss.
+             */
+            ELSE BEGIN
+              IF  @type = 0x08
+              AND (SELECT min(lost)
+                      FROM tournamentPlayers
+                      WHERE tournID = @tournID
+                      AND   td = 0) > 0
+              AND ((SELECT max(gameNum)
+                     FROM brackets
+                     WHERE tournID = @tournID
+                     AND round IN (SELECT currentRound
+                                   FROM tournaments
+                                   WHERE tournID = @tournID))
+                 = (SELECT COUNT(*)
+                     FROM brackets
+                     WHERE tournID = @tournID
+                     AND winner = 1
+                     AND round IN (SELECT currentRound
+                                   FROM tournaments
+                                   WHERE tournID = @tournID)))
+              BEGIN
+-- select 'HERE', @tournID
+                EXEC updateTournament @tournID, 0x04
+                IF @@trancount = 0 OR @lastError != 0
+                BEGIN
+                  IF @@trancount > 0
+                    ROLLBACK TRAN
+                  RETURN @lastError
+                END
+                SELECT @over = 1
+              END    -- Tournament is over since no more undefeated players
+            END      -- Special case for Swiss style
+          END        -- Check if tournament is over
+
+          /*
+           * If round over, but tournament NOT over, update the database
+           */
+          IF @over = 2
+          BEGIN
+
+            /*
+             * If in progress, toggle to between rounds
+             */
+            IF @status = 0x02
+            BEGIN
+-- select 'SET ROUND ENDED', @tournID
+              EXEC updateTournament @tournID, 0x20, 1
+              IF @@trancount = 0 OR @lastError != 0
+              BEGIN
+                IF @@trancount > 0
+                  ROLLBACK TRAN
+                RETURN @lastError
+              END
+            END		
+
+            /*
+             * If between rounds, toggle to in progress
+             */
+            ELSE BEGIN
+              IF @status = 0x20
+              BEGIN
+-- select 'SET ROUND STARTED', @tournID
+                EXEC updateTournament @tournID, 0x02, 1
+                IF @@trancount = 0 OR @lastError != 0
+                BEGIN
+                  IF @@trancount > 0
+                    ROLLBACK TRAN
+                  RETURN @lastError
+                END
+                SELECT @over = 3
+              END	-- was between rounds
+            END		-- not in progress
+          END		-- round over
+        END		-- tournament not over yet
+
+      COMMIT TRAN
+
+      /* Send a message about the game results to the other players.
+       */
+      IF @over = 1
+      BEGIN
+        /* Swiss or round robin? */
+        IF @type = 0x04 OR @type = 0x08
+        BEGIN
+          SELECT @winnerID = userID
+            FROM tournamentPlayers
+            WHERE tournID = @tournID
+            AND        td = 0
+            AND  ((2*won)+tied) IN 
+             (SELECT max((2*won)+tied)
+                FROM tournamentPlayers
+                WHERE tournID = @tournID
+                AND        td = 0)
+          IF @@rowcount > 1		-- tie for champ
+          BEGIN
+            EXEC addTournamentMsg @tournID, @round, @MsgSwissTie, @player1, @teamMate1
+          END
+          /* Unambiguous winner */
+          ELSE BEGIN
+            SELECT @player1 = nickName FROM vpusers..users WHERE userID = @winnerID
+            SELECT @teamMate1 = nickName FROM vpusers..users WHERE userID IN
+              (SELECT userID FROM teamMates WHERE tournID = @tournID AND priUserID = @winnerID)
+            EXEC addTournamentMsg @tournID, @round, @MsgTournEnded, @player1, @teamMate1
+          END
+        END
+        /* Not swiss or round robin */
+        ELSE BEGIN
+          EXEC addTournamentMsg @tournID, @round, @MsgTournEnded, @player1, @teamMate1
+        END
+      END
+      ELSE BEGIN
+        EXEC addTournamentMsg @tournID, @round, @MsgGameResults, @player1, @teamMate1
+      END
+      IF @over = 2
+      BEGIN
+        EXEC addTournamentMsg @tournID, @round, @MsgRoundEndedCmplt
+      END
+      IF @over = 3
+      BEGIN
+        SELECT @round = @round + 1
+        EXEC addTournamentMsg @tournID, @round, @MsgRoundStarted
+      END
+
+    END          -- Examine a tournament
+
+    FETCH tourneyCursor INTO @tournID, @round, @type, @status
+
+  END            -- Examine all tournaments for this ladder
+  CLOSE tourneyCursor
+
+END
+GO

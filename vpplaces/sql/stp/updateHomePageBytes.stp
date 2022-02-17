@@ -1,0 +1,103 @@
+/*
+ * Update space usage for a user home page
+ *
+ * output: return value - 0 if successful
+ *			  20001 not found
+ */
+CREATE PROC updateHomePageBytes
+(
+  @URL 	                UrlType,
+  @bytes		int
+)
+AS
+BEGIN
+  DECLARE @lastError int
+  SELECT @URL = lower(@URL)
+
+  BEGIN TRAN
+
+    IF EXISTS (SELECT * FROM homePages WHERE URL = @URL)
+    BEGIN
+
+      UPDATE homePages
+        SET bytesUsed = @bytes
+        WHERE URL = @URL
+   
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+
+    END
+    ELSE 
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20001
+    END
+
+    /*
+     * see if space limit exceeded
+     */
+    DECLARE @maxSpace        int
+    DECLARE @maxTransfer     int
+    DECLARE @megsTransferred int
+    DECLARE @userID          userIdentifier
+    DECLARE @locked          bit
+
+    SELECT @maxSpace      = maxSpace,
+	 @maxTransfer     = maxTransfer,
+	 @megsTransferred = megsTransferred,
+         @userID          = userID,
+         @locked          = locked
+      FROM homePages
+      WHERE URL = @URL
+     
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    IF @bytes > (@maxSpace*1024*1024)
+    BEGIN
+      IF @locked = 0
+      BEGIN
+        EXEC updateHomePage @userID, 'L', 1, @URL
+      END
+    END
+    ELSE BEGIN
+      /*
+       * If not over the space limit, but locked - unlock unless
+       * over the transfer limit or administratively locked.
+       */
+      IF @locked = 1
+      BEGIN
+        IF @megsTransferred < @maxTransfer
+        BEGIN
+          DECLARE @adminLock int
+          EXEC @adminLock = vpusers..getUserLock @userID
+          IF @adminLock = 0
+          BEGIN
+            EXEC updateHomePage @userID, 'L', 0, @URL
+          END
+        END
+      END
+    END
+       
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+  COMMIT TRAN
+  RETURN 0
+
+END
+GO
+GRANT EXECUTE ON updateHomePageBytes TO vpusr
+GO

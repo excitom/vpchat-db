@@ -1,0 +1,50 @@
+#!/bin/sh
+
+# This script adds home-made system procedures to the sybsystemprocs database
+
+ServicesRoot=$1
+shift
+SybaseRoot=$1
+shift
+DBAdminLogin=$1
+shift
+DBAdminPasswd=$1
+shift
+DataServer=$1
+
+sybBinDir=$SybaseRoot/bin
+
+$sybBinDir/isql -U$DBAdminLogin -P$DBAdminPasswd -S$DataServer << ! > $ServicesRoot/existing_sysprocs.txt
+USE sybsystemprocs
+GO
+SELECT name
+  FROM sysobjects
+  WHERE ( type = "P" )
+GO
+!
+
+for scriptFile in $ServicesRoot/dbutil/sql/stp/*.stp
+{
+  echo -- adding stored procedure $procName
+  procName=`grep -i create $scriptFile | cut -d" " -f3`
+  # drop the procedure if necessary
+  grep $procName $ServicesRoot/existing_sysprocs.txt > /dev/null
+  procExists=$?
+  if [ $procExists -eq 0 ]
+  then
+    # drop the procedure
+    echo dropping current version procedure $procName
+    $sybBinDir/isql -U$DBAdminLogin -P$DBAdminPasswd -S$DataServer << !
+USE sybsystemprocs
+GO
+DROP PROCEDURE $procName
+GO
+!
+  fi
+  
+  # now do the actual creation of the procedure
+  echo $sybBinDir/isql -U$DBAdminLogin -P$DBAdminPasswd -S$DataServer -i $scriptFile
+  $sybBinDir/isql -U$DBAdminLogin -P$DBAdminPasswd -S$DataServer -i $scriptFile
+}
+
+/bin/rm $ServicesRoot/existing_sysprocs.txt

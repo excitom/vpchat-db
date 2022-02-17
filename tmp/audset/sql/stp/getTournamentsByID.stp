@@ -1,0 +1,24 @@
+/*
+ * Get a list of tournaments that a specific user has joined
+ *
+ * Input: userID
+ */
+IF EXISTS
+ (SELECT name FROM sysobjects WHERE name = 'getTournamentsByID' AND type = 'P') 
+ DROP PROC getTournamentsByID
+GO  
+CREATE PROC getTournamentsByID (
+  @userID	userIdentifier
+)
+AS
+BEGIN
+  SELECT 1 AS pri, 1 AS confirmed, tournID, quit
+    FROM tournamentPlayers 
+    WHERE userID = @userID
+    AND       td = 0
+  UNION
+  SELECT 0 AS pri, confirmed AS confirmed, tournID, quit
+    FROM teamMates 
+    WHERE userID = @userID
+END
+GO

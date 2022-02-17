@@ -1,0 +1,32 @@
+/* find all the places belonging to a specific catgeory */
+/*
+  INPUT  : category ID or NULL for root places
+  OUTPUT : all the URLs of places directly related to this category
+*/
+CREATE PROC getCategoryPlaces
+(
+  @category categoryIdentifier = NULL
+)
+AS
+BEGIN
+
+  CREATE TABLE #categPlaces (URL varchar(255), type integer)
+ 
+  INSERT #categPlaces
+    SELECT URL, 2
+      FROM placeCategories
+      WHERE ( category = @category )
+
+  UPDATE #categPlaces
+    SET type = 0
+    WHERE URL IN (SELECT URL FROM persistentPlaces WHERE type != 2049)
+
+  UPDATE #categPlaces
+    SET type = 1
+    WHERE URL IN (SELECT URL FROM persistentPlaces WHERE type = 2049)
+
+  SELECT *
+    FROM #categPlaces
+
+END  
+GO 

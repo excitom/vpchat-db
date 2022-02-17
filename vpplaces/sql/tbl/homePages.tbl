@@ -1,0 +1,46 @@
+/*
+ * User-created home pages.
+ *
+ * Each user may have a home page, and the URL path is the user name. For
+ * example, user name tom can have http://members.vpchat.com/tom
+ *
+ * Also, the user can define a case-sensitive alias, for example
+ * http://members.vpchat.com/Tom
+ *
+ * The URL and URL2 columns contain the lover-case user name and optional
+ * mixed case user name.
+ *
+ * There can be one home page per user, though records are not automatically
+ * created when users are added. Records are added when the user explicitly
+ * asks to have a home page.
+ *
+ * Byte transfer limits are reset on a periodic basis. The statsDate is the
+ * next date counters will be reset for this home page.
+ * 
+ */
+CREATE TABLE homePages
+(
+	userID		userIdentifier			NOT NULL
+			constraint isPrimary primary key,
+	URL		UrlType				NOT NULL,
+	URL2		UrlType				NULL,
+	statsDate	VpTime				NOT NULL,
+	maxSpace	int				NOT NULL,
+-- unit = megabytes
+	maxTransfer	int				NOT NULL,
+-- unit = megabytes
+	megsTransferred	int	DEFAULT 0		NOT NULL,
+	bytesTransferred	int	DEFAULT 0	NOT NULL,
+-- when bytesTransferred passes 1024*1024, megsTransferred
+-- is incremented and bytesTransferred is reset.
+	webHits		int	DEFAULT 0		NOT NULL,
+	pageViews	int	DEFAULT 0		NOT NULL,
+	bytesUsed	int	DEFAULT 0		NOT NULL,
+	locked		bit	DEFAULT 0		NOT NULL,
+	deleted		bit	DEFAULT 0		NOT NULL
+)
+GO
+GRANT SELECT ON homePages TO PUBLIC
+GO
+GRANT UPDATE ON homePages TO vpusr
+GO

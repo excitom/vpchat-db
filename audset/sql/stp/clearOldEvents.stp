@@ -1,0 +1,27 @@
+/* Delete events older then the number of days
+   we must keep them. Deletes records from the
+   event table, other tables are cleaned up via
+   a trigger */
+CREATE PROCEDURE clearOldEvents
+(
+  @daysToKeep int
+)
+AS
+BEGIN
+  DECLARE @lastError  int
+  DECLARE @diffFromGMT int
+  DECLARE @currentDate VpTime
+  DECLARE @deleteBeforeDate VpTime
+  SELECT @diffFromGMT = gmt
+    FROM vpusers..getGMT
+  SELECT @lastError = @@error
+  IF @lastError != 0
+    RETURN @lastError
+  IF @diffFromGMT IS NULL
+    SELECT @diffFromGMT = 0
+  SELECT @currentDate = dateadd( hour, (-1) * @diffFromGMT, getdate() )
+  SELECT @deleteBeforeDate = dateadd( day, (-1) * @daysToKeep, @currentDate )
+  DELETE events
+    WHERE date <= @deleteBeforeDate
+END
+GO

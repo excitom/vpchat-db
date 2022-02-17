@@ -1,0 +1,28 @@
+/*
+ * This table augments the referral information that formerly was 
+ * completely contained in the userAccounts table. For each 
+ * user account, there could be a referredByID. Also, for each user
+ * account there was an enrolledReferrer flag.
+ *
+ * A row is added to this table when a user (denoted by userID) refers
+ * to someone (referredByID) at sign-up. The type is defined as follows:
+ * 0 = monthly $1 referral
+ * 1 = new one time referral (pending validity check)
+ * 2 = $10 one time referral
+ * 3 = $20 one time referral
+ *
+ * 254 = invalid referral
+ * 255 = unenrolled referrer
+ *
+ */
+CREATE TABLE referrals
+(
+	accountID	userIdentifier			NOT NULL
+                        CONSTRAINT referralIsPrimary PRIMARY KEY
+                       	CONSTRAINT referralRefToUsers REFERENCES users,
+	referredByID	userIdentifier			NOT NULL,
+	type		tinyint				NOT NULL,
+	paymentDate	VpTime				NULL
+)
+ON userDetailsSeg
+GO

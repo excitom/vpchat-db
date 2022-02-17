@@ -1,0 +1,214 @@
+/*
+ * Subscribe a user to a notify list
+ *
+ * Input: List ID, userID, notification preference
+ *
+ *   Notification preference:
+ *   - community
+ *     1 ->  vpchat
+ *     2 ->  vpadult
+ *   - IM type
+ *     4 ->  chat
+ *     8 ->  buddy
+ *   - offline notify
+ *     16 -> email
+ *     32 -> SMS
+ *
+ * Output: 0 = success
+ *         1 = success, existing subscription updated
+ *         2 = success, pending private list owner approval
+ *         3 = success, existing pending request updated
+ *         20000 = list not found 
+ *         20001 = list is deleted
+ *         20002 = list is locked
+ *         20003 = user not found 
+ */
+CREATE PROC subscribeNotifyList (
+	@notifyID	  userIdentifier,
+	@userID		  userIdentifier,
+	@notifyPref	  smallint
+)
+AS
+BEGIN
+  DECLARE @lastError	int
+  DECLARE @rc		int
+  DECLARE @locked	bit
+  DECLARE @deleted	bit
+  DECLARE @approvalRqd	bit
+  DECLARE @type		int
+  DECLARE @diffFromGMT 	int
+  DECLARE @now    	VpTime
+  DECLARE @nickName	VPuserID
+
+  BEGIN TRAN
+    SELECT @type = type,
+	   @locked = locked,
+	   @deleted = deleted
+    FROM notifyLists
+    WHERE notifyID = @notifyID
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    IF @type IS NULL
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20000
+    END
+
+    IF @locked = 1
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20002
+    END
+
+    IF @deleted = 1
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20001
+    END
+
+    SELECT @nickName = NULL
+    SELECT @nickName = nickName
+      FROM vpusers..users
+      WHERE userID = @userID
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    IF @nickName IS NULL
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20003
+    END
+
+    IF EXISTS (SELECT * FROM notifySubscrs WHERE userID = @userID AND notifyID = @notifyID)
+    BEGIN
+      UPDATE notifySubscrs
+        SET  notifyPref = @notifyPref
+        WHERE userID = @userID AND notifyID = @notifyID
+
+      SELECT @rc = 1
+    END
+    ELSE BEGIN
+      IF @type & 64 = 64
+      BEGIN
+        SELECT @diffFromGMT = gmt
+          FROM vpusers..getGMT
+        IF @diffFromGMT IS NULL
+          SELECT @diffFromGMT = 0
+    
+        SELECT @lastError = @@error
+        IF @lastError != 0
+        BEGIN
+          ROLLBACK TRAN
+          RETURN @lastError
+        END
+
+        SELECT @approvalRqd = approvalRqd
+          FROM privateLists
+          WHERE notifyID = @notifyID
+    
+        SELECT @lastError = @@error
+        IF @lastError != 0
+        BEGIN
+          ROLLBACK TRAN
+          RETURN @lastError
+        END
+
+        SELECT @now = dateadd( hour, (-1) * @diffFromGMT, getdate() )
+
+        IF @approvalRqd = 1
+        BEGIN
+          IF EXISTS (SELECT * FROM pendingListSubscrs WHERE userID = @userID AND notifyID = @notifyID)
+          BEGIN
+            SELECT @rc = 3
+            UPDATE pendingListSubscrs
+              SET notifyPref = @notifyPref,
+                  requestDate = @now
+            WHERE notifyID = @notifyID
+            AND userID = @userID
+          END
+          ELSE BEGIN
+            SELECT @rc = 2
+            INSERT pendingListSubscrs (notifyID, userID, notifyPref, requestDate)
+              VALUES(@notifyID, @userID, @notifyPref, @now)
+          END
+        END
+        ELSE BEGIN
+          SELECT @rc = 0
+          INSERT notifySubscrs (notifyID, userID, notifyPref)
+            VALUES(@notifyID, @userID, @notifyPref)
+        END
+      END
+      ELSE BEGIN
+        SELECT @rc = 0
+        INSERT notifySubscrs (notifyID, userID, notifyPref)
+          VALUES(@notifyID, @userID, @notifyPref)
+      END
+
+    END
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    /*
+     * If this is a "notify on join list" then
+     * schedule an event.
+     */
+    -- IF @type & 0x80 = 0x80
+    IF 0 = 1
+    BEGIN
+      IF NOT EXISTS (
+        SELECT * FROM notifySubscrHistory
+          WHERE notifyID = @notifyID
+          AND     userID = @userID
+      )
+      BEGIN
+        SELECT @diffFromGMT = gmt
+          FROM vpusers..getGMT
+        IF @diffFromGMT IS NULL
+          SELECT @diffFromGMT = 0
+    
+        SELECT @lastError = @@error
+        IF @lastError != 0
+        BEGIN
+          ROLLBACK TRAN
+          RETURN @lastError
+        END
+        SELECT @now = dateadd( hour, (-1) * @diffFromGMT, getdate() )
+
+        INSERT notifySubscrHistory (notifyID, userID, subscrTime)
+          VALUES (@notifyID, @userID, @now)
+
+        DECLARE @message longName
+        SELECT @message = @nickName + ' has joined.'
+    
+        INSERT notifyEvents (notifyID, userID, accountID, time, message)
+          VALUES (@notifyID, @userID, 1, @now, @message)
+
+        SELECT @lastError = @@error
+        IF @lastError != 0
+        BEGIN
+          ROLLBACK TRAN
+          RETURN @lastError
+        END
+      END
+    END
+
+  COMMIT TRAN
+  RETURN @rc
+END
+GO

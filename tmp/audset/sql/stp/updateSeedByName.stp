@@ -1,0 +1,181 @@
+/*
+ * Update a player's seeding in a tournament bracket.
+ *
+ * Input: Player name, EventID, new seed
+ *
+ * Output: 0 = success
+ *         20000 = no such tournament
+ *         20001 = no such player
+ *         20002 = invalid seed
+ *         20003 = cannot update (reg still open or tournament started)
+ *
+ * If successful, the seed of the player is updated and the player
+ * who formerly had that seed assumes the original seed of this player.
+ */
+IF EXISTS
+ (SELECT name FROM sysobjects WHERE name = 'updateSeedByName' AND type = 'P') 
+ DROP PROC updateSeedByName
+GO  
+CREATE PROC updateSeedByName (
+  @player	VPuserID,
+  @tournID	userIdentifier,
+  @seed		tinyint
+)
+AS
+BEGIN
+  DECLARE @lastError integer
+  DECLARE @oldSeed   tinyint
+  DECLARE @userID    userIdentifier
+  DECLARE @userID2   userIdentifier
+  DECLARE @players   tinyint
+  DECLARE @status   tinyint
+
+  SELECT @userID = NULL
+  SELECT @userID = userID
+    FROM vpusers..users
+    WHERE nickName = @player
+    AND   registrationMode = 2
+
+  IF @userID IS NULL
+  BEGIN
+    RETURN 20001
+  END
+
+  BEGIN TRAN
+    SELECT @players = NULL
+    SELECT @players = players, @status = status FROM tournaments
+      WHERE tournID = @tournID
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    IF @status IS NULL
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20000
+    END
+
+    IF @status != 0x10
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20003
+    END
+
+    /*
+     * If input userID = 0, go through existing seeds and renumber
+     */
+    IF @userID = 0
+    BEGIN
+      DECLARE @i int
+      SELECT @i = 1
+      DECLARE seedCursor CURSOR
+        FOR SELECT player
+              FROM brackets
+              WHERE tournID = @tournID
+              AND   round = 1
+              ORDER BY seed ASC
+
+      OPEN seedCursor
+      FETCH seedCursor INTO @userID
+      WHILE ( @@sqlstatus = 0 ) 
+      BEGIN
+        UPDATE brackets
+          SET seed = @i
+          WHERE tournID = @tournID
+          AND     round = 1
+          AND    player = @userID
+
+        SELECT @lastError = @@error
+        IF @lastError != 0
+        BEGIN
+          ROLLBACK TRAN
+          RETURN @lastError
+        END
+        SELECT @i = @i + 1
+        FETCH seedCursor INTO @userID
+      END
+      CLOSE seedCursor
+    END
+
+    /*
+     * If a specific user was input, update that seed
+     */
+    ELSE BEGIN
+      IF @seed < 1 OR @seed > @players
+      BEGIN
+        ROLLBACK TRAN
+        RETURN 20002
+      END
+
+      SELECT @oldSeed = NULL
+      SELECT @oldSeed = seed
+        FROM brackets WHERE tournID = @tournID
+        AND  round = 1
+        AND player = @userID
+
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+
+      IF @oldSeed IS NULL
+      BEGIN
+        ROLLBACK TRAN
+        RETURN 20001
+      END
+
+      SELECT @userID2 = NULL
+      SELECT @userID2 = player
+        FROM brackets WHERE tournID = @tournID
+        AND round = 1
+        AND  seed = @seed
+
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+
+      IF @userID2 IS NULL
+      BEGIN
+        ROLLBACK TRAN
+        RETURN 20002
+      END
+
+      UPDATE brackets
+        SET player = @userID
+        WHERE tournID = @tournID
+        AND     round = 1
+        AND      seed = @seed
+
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+
+      UPDATE brackets
+        SET player = @userID2
+        WHERE tournID = @tournID
+        AND     round = 1
+        AND      seed = @oldSeed
+
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+    END
+
+  COMMIT TRAN
+END
+GO

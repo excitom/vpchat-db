@@ -1,0 +1,17 @@
+/*
+ * check validity of a notifyList ID
+ */
+CREATE PROC checkNotifyList (@notifyID userIdentifier)
+AS
+BEGIN
+  IF EXISTS (SELECT * from notifyLists WHERE notifyID = @notifyID)
+  BEGIN
+    RETURN 0
+  END
+  ELSE BEGIN
+    RETURN 20001
+  END
+END
+GO
+GRANT EXECUTE ON checkNotifyList TO public
+GO

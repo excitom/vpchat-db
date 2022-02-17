@@ -1,0 +1,8 @@
+CREATE TABLE runningBalance
+(
+	paymentID	userIdentifier			NOT NULL
+                        	constraint isPrimary primary key,
+	balance		smallmoney			NOT NULL
+)
+ON userDetailsSeg
+GO

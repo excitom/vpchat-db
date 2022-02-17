@@ -1,0 +1,4 @@
+/* index privileges by user id and privilege type */
+CREATE UNIQUE INDEX privilegeByUserIdx
+ON userPrivileges ( userID, privilegeType )
+GO

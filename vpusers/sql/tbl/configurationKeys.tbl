@@ -1,0 +1,16 @@
+CREATE TABLE configurationKeys
+(
+	keyName		varchar(20)			NOT NULL
+                        constraint isPrimary primary key,
+        /* the following are used to fetch just matching parameters, 
+           and get it by number */
+	belongsTo	serviceID	DEFAULT 0	NOT NULL,
+	type		smallInt	DEFAULT 1	NOT NULL,
+	keyID		smallInt	DEFAULT 1	NOT NULL,
+
+	intValue	int				NULL,
+	strValue	varchar(255)			NULL
+)
+GO
+GRANT SELECT ON configurationKeys TO vpplaces
+GO

@@ -1,0 +1,172 @@
+/*
+ * Update stats for a user home page
+ *
+ * output: return value - 0 if successful
+ *			  20001 not found
+ */
+CREATE PROC updateHomePageStats
+(
+  @URL 	                UrlType,
+  @webHits		int,
+  @pageViews		int,
+  @bytesTransferred	int
+)
+AS
+BEGIN
+  DECLARE @lastError int
+  SELECT @URL = lower(@URL)
+
+  DECLARE @meg int
+  SELECT  @meg = 1024*1024
+  DECLARE @megs int
+  DECLARE @bytes int
+
+  BEGIN TRAN
+
+    IF EXISTS (SELECT * FROM homePages WHERE URL = @URL)
+    BEGIN
+
+      SET ARITHABORT OFF	-- recover in case of overflow
+
+      /*
+       * bytesTransferred delta is > 1 meg ?
+       */
+      IF @bytesTransferred > @meg
+      BEGIN
+        SELECT @megs = floor(@bytesTransferred / @meg)
+        SELECT @bytes = @bytesTransferred % @meg
+
+        UPDATE homePages
+          SET webHits = webHits + @webHits,
+              pageViews = pageViews + @pageViews,
+              bytesTransferred = bytesTransferred + @bytes,
+              megsTransferred = megsTransferred + @megs
+          WHERE URL = @URL
+   
+        SELECT @lastError = @@error
+        IF @lastError != 0
+        BEGIN
+          ROLLBACK TRAN
+          RETURN @lastError
+        END
+      END
+      /*
+       * relatively small bytesTransferred delta
+       */
+      ELSE BEGIN
+      
+        UPDATE homePages
+          SET webHits = webHits + @webHits,
+              pageViews = pageViews + @pageViews,
+              bytesTransferred = bytesTransferred + @bytesTransferred
+          WHERE URL = @URL
+   
+        SELECT @lastError = @@error
+        IF @lastError != 0
+        BEGIN
+          ROLLBACK TRAN
+          RETURN @lastError
+        END
+      END
+
+      SELECT @bytesTransferred = bytesTransferred
+        FROM homePages
+        WHERE URL = @URL
+
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+
+      /*
+       * paranoid about overflow and accuracy
+       * - keep the bytesTransferred figure at or below 1 meg
+       */
+      IF @bytesTransferred >= @meg
+      BEGIN
+        SELECT @megs = floor(@bytesTransferred / @meg)
+        SELECT @bytes = @bytesTransferred % @meg
+        UPDATE homePages
+          SET megsTransferred = megsTransferred + @megs,
+              bytesTransferred = @bytes
+          WHERE URL = @URL
+
+        SELECT @lastError = @@error
+        IF @lastError != 0
+        BEGIN
+          ROLLBACK TRAN
+          RETURN @lastError
+        END
+      END
+    END
+    ELSE 
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20001
+    END
+   
+    /*
+     * See if over the transfer limit
+     */
+    DECLARE @locked bit
+    DECLARE @megsTransferred int
+    DECLARE @maxTransfer int
+    DECLARE @userID userIdentifier
+    DECLARE @maxSpace int
+    DECLARE @bytesUsed int
+
+    SELECT @locked       = locked,
+        @megsTransferred = megsTransferred,
+        @maxTransfer     = maxTransfer,
+        @maxSpace        = maxSpace,
+        @bytesUsed       = bytesUsed,
+        @userID          = userID
+      FROM homePages
+      WHERE URL = @URL
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    IF @locked = 0 AND @megsTransferred > @maxTransfer
+    BEGIN
+      EXEC updateHomePage @userID, 'L', 1, @URL
+    END
+    ELSE BEGIN
+      /*
+       * If not over the transfer limit, but locked - unlock unless
+       * over the space limit or administratively locked.
+       */
+      IF @locked = 1
+      BEGIN
+        IF @bytesUsed < (@maxSpace*1024*1024)
+        BEGIN
+          DECLARE @adminLock int
+          EXEC @adminLock = vpusers..getUserLock @userID
+          IF @adminLock = 0
+          BEGIN
+            EXEC updateHomePage @userID, 'L', 0, @URL
+          END
+        END
+      END
+    END
+       
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+  COMMIT TRAN
+  RETURN 0
+
+END
+GO
+GRANT EXECUTE ON updateHomePageStats TO vpusr
+GO

@@ -1,0 +1,93 @@
+/* get member directory info from userDetails, users, and registration table
+   Input: flag
+     - 0 = show all
+     - 1 = show only if profile exists
+	  flag2
+     - 0 = output details
+     - 1 = output count only
+   Output:
+     rows flagged in first column
+     - 0 = no profile
+     - 1 = has profile
+*/
+CREATE PROC getMemberDir ( @profileOnly bit = 0, @countOnly bit = 0 )
+AS
+BEGIN
+ IF @countOnly = 1
+ BEGIN
+  IF @profileOnly = 0 
+  BEGIN
+    SELECT 1, COUNT(nickName)
+      FROM  vpusers..users, vpusers..registration, vpusers..userAccounts
+      WHERE EXISTS (SELECT * FROM vpusers..userDetails
+      WHERE vpusers..users.userID=vpusers..userDetails.userID)
+      AND vpusers..users.userID=vpusers..registration.userID
+      AND registration.accountID > 0
+      AND vpusers..registration.accountID=vpusers..userAccounts.accountID
+      AND vpusers..userAccounts.accountStatus = 0
+    UNION
+    SELECT 0, COUNT(nickName)
+      FROM  vpusers..users, vpusers..registration, vpusers..userAccounts
+      WHERE NOT EXISTS (SELECT * FROM vpusers..userDetails
+      WHERE vpusers..users.userID=vpusers..userDetails.userID)
+      AND vpusers..users.userID=vpusers..registration.userID
+      AND registration.accountID > 0
+      AND vpusers..registration.accountID=vpusers..userAccounts.accountID
+      AND vpusers..userAccounts.accountStatus = 0
+  END
+  ELSE BEGIN
+    SELECT 1, COUNT(nickName)
+      FROM  vpusers..users, vpusers..registration, vpusers..userAccounts
+      WHERE EXISTS (SELECT * FROM vpusers..userDetails
+      WHERE vpusers..users.userID=vpusers..userDetails.userID)
+      AND vpusers..users.userID=vpusers..registration.userID
+      AND registration.accountID > 0
+      AND vpusers..registration.accountID=vpusers..userAccounts.accountID
+      AND vpusers..userAccounts.accountStatus = 0
+  END
+
+ END
+ ELSE
+ BEGIN
+  IF @profileOnly = 0 
+  BEGIN
+    SELECT 1, nickName
+      FROM  vpusers..users, vpusers..registration, vpusers..userAccounts
+      WHERE EXISTS (SELECT * FROM vpusers..userDetails
+      WHERE vpusers..users.userID=vpusers..userDetails.userID)
+      AND vpusers..users.userID=vpusers..registration.userID
+      AND registration.accountID > 0
+      AND vpusers..registration.accountID=vpusers..userAccounts.accountID
+      AND vpusers..userAccounts.accountStatus = 0
+    UNION
+    SELECT 0, nickName
+      FROM  vpusers..users, vpusers..registration, vpusers..userAccounts
+      WHERE NOT EXISTS (SELECT * FROM vpusers..userDetails
+      WHERE vpusers..users.userID=vpusers..userDetails.userID)
+      AND vpusers..users.userID=vpusers..registration.userID
+      AND registration.accountID > 0
+      AND vpusers..registration.accountID=vpusers..userAccounts.accountID
+      AND vpusers..userAccounts.accountStatus = 0
+    ORDER BY nickName
+  END
+  ELSE BEGIN
+    SELECT 1, nickName
+      FROM  vpusers..users, vpusers..registration, vpusers..userAccounts
+      WHERE EXISTS (SELECT * FROM vpusers..userDetails
+      WHERE vpusers..users.userID=vpusers..userDetails.userID)
+      AND vpusers..users.userID=vpusers..registration.userID
+      AND registration.accountID > 0
+      AND vpusers..registration.accountID=vpusers..userAccounts.accountID
+      AND vpusers..userAccounts.accountStatus = 0
+    ORDER BY nickName
+  END
+ END
+
+ DECLARE @lastError int
+ SELECT @lastError = @@error
+ IF @lastError != 0
+ BEGIN
+   RETURN @lastError
+ END
+END
+GO 

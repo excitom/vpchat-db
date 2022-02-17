@@ -1,0 +1,28 @@
+USE audset
+GO
+CREATE TABLE dbo.calendar 
+(
+	eventID		userIdentifier	IDENTITY
+			CONSTRAINT isPrimary PRIMARY KEY,
+	startDate	dateTime	NOT NULL,
+	endDate		dateTime	NULL,
+	description	longName	NOT NULL,
+	URL       	longName	NULL,
+	type		integer		NOT NULL,
+	-- 1 = Family
+	-- 2 = Adult
+	-- 3 = Guides Only
+	repeat		char(1)		NULL,
+	allDay		bit		NOT NULL,
+        hasMore		bit		NOT NULL,
+	information	text		NULL,
+	capacity	integer		NULL,
+	pendingApproval	tinyint		NULL
+)
+GO
+GRANT ALL ON calendar TO vpusr
+IF OBJECT_ID('dbo.calendar') IS NOT NULL
+	PRINT '<<< CREATED TABLE dbo.calendar >>>'
+ELSE
+	PRINT '<<< FAILED CREATING TABLE dbo.calendar >>>'
+GO

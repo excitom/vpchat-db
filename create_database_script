@@ -1,0 +1,115 @@
+#!/bin/sh
+
+# This script does the creation of one database
+
+ServicesRoot=$1
+shift
+DBName=$1
+
+echo creating script for building database $DBName
+
+SrvRoot=$ServicesRoot/$DBName
+
+resFile=$ServicesRoot/dbSizes.txt
+
+databaseSize=`grep $DBName= $resFile | cut -d" " -f2`
+DbLogSize=$4
+ownerName=`grep $DBName.DbOwner.name= $resFile | cut -d" " -f2`
+
+#################################
+# GENERATE create_db.sql file # 
+#################################
+echo -- Creating Database $DBName > $SrvRoot/create_db_$DBName.sql
+echo CREATE DATABASE $DBName ON >> $SrvRoot/create_db_$DBName.sql
+
+
+# find all data segments
+grep $DBName.allocation.data $resFile > $SrvRoot/dataSegments.txt
+numberOfDataSegments=`cat $SrvRoot/dataSegments.txt | wc -l`
+grep $DBName.allocation.log $resFile > $SrvRoot/logSegments.txt
+numberOfLogSegments=`cat $SrvRoot/logSegments.txt | wc -l`
+
+segNum=1
+while [ $numberOfDataSegments -ge $segNum ]
+do
+  segDevice=`head -$segNum $SrvRoot/dataSegments.txt | tail -1 | cut -d"." -f4`
+  if [ $segNum -gt 1 ]
+  then
+    echo "," >> $SrvRoot/create_db_$DBName.sql
+  fi
+  echo $segDevice >> $SrvRoot/create_db_$DBName.sql
+  # increase segNum
+  segNum=`expr $segNum + 1`
+done
+
+cat << ! >> $SrvRoot/create_db_$DBName.sql
+		LOG ON 
+!
+segNum=1
+while [ $numberOfLogSegments -ge $segNum ]
+do
+  segDevice=`head -$segNum $SrvRoot/logSegments.txt | tail -1 | cut -d"." -f4`
+  if [ $segNum -gt 1 ]
+  then
+    echo "," >> $SrvRoot/create_db_$DBName.sql
+  fi
+  echo $segDevice >> $SrvRoot/create_db_$DBName.sql
+  # increase segNum
+  segNum=`expr $segNum + 1`
+done
+
+cat << ! >> $SrvRoot/create_db_$DBName.sql
+GO
+
+sp_dboption $DBName,"abort tran on log full",TRUE
+GO
+
+use $DBName
+GO
+!
+
+# find segments usage - remove system and default 
+# from segments where necessary
+numberOfUserSegments=`grep $DBName.userDefinedSegments= $resFile | cut -d" " -f2`
+segmentNumber=1
+# set the using segments for an allocated device for one database
+while [ $numberOfLogSegments -ge $segNum ]
+do
+  segmentName=`grep $DBName.segment$segmentNumber.name= $resFile | cut -d" " -f2`
+  segmentLocation=`grep $DBName.segment$segmentNumber.location= $resFile | cut -d" " -f2`
+  
+  echo sp_addsegment $segmentName, $DBName, $segmentLocation >> $SrvRoot/create_db_$DBName.sql
+  echo GO                                                    >> $SrvRoot/create_db_$DBName.sql
+  
+  # remove system and default segments from user defined segments location,
+  # unless otherwise specified
+  doRemove=`grep "$DBName.deviceUse.$segmentLocation= system" $resFile | cut -d" " -f2`
+  if [ A$doRemove == Asystem ]
+  then
+    echo sp_dropsegment \"system\", $DBName, $segmentLocation  >> $SrvRoot/create_db_$DBName.sql
+    echo GO                                                  >> $SrvRoot/create_db_$DBName.sql
+  fi
+  doRemove=`grep "$DBName.deviceUse.$segmentLocation= default" $resFile | cut -d" " -f2`
+  if [ A$doRemove == Asystem ]
+  then
+    echo sp_dropsegment \"default\", $DBName, $segmentLocation >> $SrvRoot/create_db_$DBName.sql
+    echo GO                                                    >> $SrvRoot/create_db_$DBName.sql
+  fi
+
+  # increase segNum
+  segmentNumber=`expr $segmentNumber + 1`
+done
+
+\rm $SrvRoot/dataSegments.txt
+\rm $SrvRoot/logSegments.txt
+
+cat << ! >> $SrvRoot/create_db_$DBName.sql
+
+sp_changedbowner $ownerName, TRUE
+checkpoint
+GO
+sp_modifylogin $ownerName, defdb, $DBName
+GO
+!
+
+

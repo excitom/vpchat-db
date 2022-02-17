@@ -1,0 +1,60 @@
+/*
+ * get account's email (PHP version - returning a single result set)
+ * input:  user name
+ * output: email and account owner nickName
+ */
+CREATE PROC getAcctEmail_p ( @nickName VPuserID )
+AS
+BEGIN
+  DECLARE @accountID userIdentifier
+  DECLARE @ownerID   userIdentifier
+  DECLARE @email     longName
+  DECLARE @ownerName VPuserID
+  DECLARE @lastError int
+
+  BEGIN TRAN
+    SELECT @nickName = lower(@nickName)
+
+    SELECT @accountID = accountID
+      FROM registration,users
+      WHERE nickName = @nickName
+      AND   registrationMode = 2
+      AND   users.userID = registration.userID
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN @lastError
+    END
+
+    SELECT @ownerID = ownerID,
+           @email = email
+      FROM  userAccounts
+      WHERE accountID = @accountID
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN @lastError
+    END
+
+    SELECT @ownerName = nickName
+      FROM  users
+      WHERE userID = @ownerID
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN @lastError
+    END
+
+    /* write result rows to output */
+    SELECT @email AS email, @ownerName AS ownerName
+  COMMIT TRAN
+END
+GO 
+GRANT EXECUTE ON getAcctEmail_p TO audset
+GO

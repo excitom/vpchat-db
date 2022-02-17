@@ -1,0 +1,18 @@
+/* get details for a specific auditorium:
+   name, client name, background, 
+   title, welcome message, show on PTG flag, 
+   stage capacity, row size, # of rows */
+/* input:  auditorium id
+   output: name, client name, background, title,
+   welcome message, show on PTG flag, 
+   stage capacity, row size, # of rows
+*/
+CREATE PROC getAuditorium ( @auditoriumID numeric(6,0) )
+AS
+  SELECT name, client, background,
+         title, welcomeMsg1, welcomeMsg2,
+         inPlacesList, 
+         stageCapacity, rowSize, numberOfRows
+    FROM auditoriums
+    WHERE auditoriumID = @auditoriumID
+GO

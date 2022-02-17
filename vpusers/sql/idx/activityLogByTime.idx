@@ -1,0 +1,4 @@
+CREATE INDEX activityLogByTime
+ON activityLog ( time )
+ON userDetailsSeg
+GO

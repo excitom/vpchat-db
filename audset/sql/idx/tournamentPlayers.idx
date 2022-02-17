@@ -1,0 +1,3 @@
+CREATE INDEX tournamentPlayersIdx
+ON tournamentPlayers ( tournID, userID, td )
+GO

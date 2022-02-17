@@ -1,0 +1,57 @@
+/*
+ * Get user name, password, accountID, and email 
+ * for a newly created account.
+ *
+ * This is a special purpose function for the new-account registration
+ * web pages.
+ *
+ * Input: Account ID
+ *
+ * Output: 0 = success
+ *         20000 = acct not found
+ *         20001 = acct not new
+ */
+CREATE PROC getNewAcctInfo ( @accountID userIdentifier )
+AS
+BEGIN
+  DECLARE @email         longName
+  DECLARE @ownerName     VPuserID
+  DECLARE @password      VPPassword
+  DECLARE @accountStatus tinyInt
+  DECLARE @lastError     int
+
+  BEGIN TRAN
+
+    SELECT @ownerName     = nickName,
+           @email         = userAccounts.email,
+           @password      = password,
+           @accountStatus = accountStatus
+      FROM users, registration, userAccounts
+      WHERE userAccounts.accountID = @accountID
+      AND   userAccounts.ownerID = users.userID
+      AND   userAccounts.ownerID = registration.userID
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN @lastError
+    END
+
+    IF @ownerName IS NULL
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN 20000
+    END
+
+    IF @accountStatus != 1
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN 20001
+    END
+
+    SELECT @ownerName, @password, @email 
+
+  COMMIT TRAN
+END
+GO

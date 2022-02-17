@@ -1,0 +1,89 @@
+/* 
+ * Find info about a payment transaction.
+ *
+ * This is intended for use in the web page which submits a transaction
+ * to the payment gateway. The act of getting the info also results in
+ * marking it "closed," to prevent duplicate transactions.
+ *
+ * Return: 0 = OK
+ *         20000 = invoice not found
+ *         20001 = already closed
+ */
+CREATE PROC getTransaction (
+  @invoice	longName,
+  @completeIt   bit=1,		-- can be set to zero for debugging
+  @readOnly     bit=0
+)
+AS
+BEGIN
+  DECLARE @lastError	int
+  DECLARE @t_accountID	userIdentifier
+  DECLARE @t_ccID	userIdentifier
+  DECLARE @t_type	tinyint
+  DECLARE @t_amount	smallmoney
+  DECLARE @completed    bit
+
+  BEGIN TRAN
+    
+    SELECT @t_accountID = accountID,
+           @t_ccID      = ccID,
+           @t_type      = type,
+           @t_amount    = amount,
+           @completed   = completed
+      FROM transactions
+      WHERE invoice = @invoice
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    IF @t_accountID IS NULL
+    OR @t_ccID      IS NULL
+    OR @t_type      IS NULL
+    OR @t_amount    IS NULL
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20000
+    END
+
+    IF @readOnly = 1
+    BEGIN
+      SELECT @t_accountID AS accountID,
+             @t_ccID      AS ccID,
+             @t_type      AS type,
+             @t_amount    AS amount,
+             @completed   AS completed
+    END
+    ELSE BEGIN
+      IF @completed = 1
+      BEGIN
+        ROLLBACK TRAN
+        RETURN 20001
+      END
+
+      IF @completeIt = 1
+      BEGIN
+        UPDATE transactions SET completed = 1 WHERE invoice = @invoice 
+
+        SELECT @lastError = @@error
+        IF @lastError != 0
+        BEGIN
+          ROLLBACK TRAN
+          RETURN @lastError
+        END
+      END
+
+      SELECT @t_accountID AS accountID,
+             @t_ccID      AS ccID,
+             @t_type      AS type,
+             @t_amount    AS amount
+    END
+
+  COMMIT TRAN
+
+  RETURN 0
+END
+GO

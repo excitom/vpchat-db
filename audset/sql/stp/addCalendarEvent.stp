@@ -1,0 +1,64 @@
+/* Copyright 2005 Tom Lang, All right reserved */
+/*
+ * Add a calendar event
+ *
+ * Tom Lang 3/2005
+ */
+IF EXISTS(SELECT name FROM sysobjects WHERE name='addCalendarEvent' AND type='P')
+ DROP PROC addCalendarEvent
+GO
+CREATE PROC addCalendarEvent (
+  @startDate	smallDateTime,
+  @description	longName,
+  @type		integer,
+  @repeat	char(1),
+  @allDay	bit,
+  @clientTZ	integer = NULL,
+  @endDate	smallDateTime = NULL,
+  @URL      	longName = NULL
+)
+AS
+BEGIN
+  DECLARE @lastError	integer
+  DECLARE @diffFromGMT	integer
+  DECLARE @eventID	userIdentifier
+
+  IF @clientTZ IS NULL
+  BEGIN
+    SELECT @diffFromGMT = intValue
+      FROM vpusers..configurationKeys
+      WHERE keyName = 'diffFromGMT'
+  END
+  ELSE
+    SELECT @diffFromGMT = @clientTZ
+
+  SELECT @startDate = dateadd( hour, (-1) * @diffFromGMT, @startDate )
+  IF @endDate IS NOT NULL
+    SELECT @endDate = dateadd( hour, (-1) * @diffFromGMT, @endDate )
+
+  BEGIN TRAN
+    INSERT calendar (description, type, repeat, startDate, endDate, allDay,
+                   URL, repeat, pendingApproval)
+      VALUES (@description, @type, @repeat, @startDate, @endDate, @allDay,
+              @URL, @repeat, 0)
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    SELECT @eventID = @@identity 
+
+    SELECT @eventID AS eventID
+  COMMIT TRAN
+END
+GO
+GRANT EXECUTE ON addCalendarEvent TO vpusr
+GO
+IF OBJECT_ID('dbo.addCalendarEvent') IS NOT NULL
+	PRINT '<<< CREATED PROCEDURE dbo.addCalendarEvent >>>'
+ELSE
+	PRINT '<<< FAILED CREATING PROCEDURE dbo.addCalendarEvent >>>'
+GO

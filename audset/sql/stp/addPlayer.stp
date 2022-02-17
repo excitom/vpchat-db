@@ -1,0 +1,327 @@
+/*
+ * Add a player to a tournament
+ *
+ * Input: tournID, userID
+ *
+ * The "td" flag indicates if this is a tournament director rather
+ * than an active player. Tournament alert IMs are sent only to the
+ * participants and to the tournament director, so they need to be
+ * added to this list.
+ *
+ * Output: 0 = success
+ *         20000 = no such tournament
+ *         20001 = tournament is full
+ *         20002 = registration is closed
+ *         20003 = already registered for this tournament
+ *         20004 = not a member of this ladder
+ *         20005 = not enough points/money
+ *         20006 = unknown currency type
+ *         20007 = registered for tournament in different ladder
+ *         20008 = teammate is not a ladder member
+ *         20009 = teammate already registered
+ *         20010 = can't be your own teammate
+ */
+IF EXISTS
+ (SELECT name FROM sysobjects WHERE name = 'addPlayer' AND type = 'P') 
+ DROP PROC addPlayer
+GO  
+CREATE PROC addPlayer (
+  @userID	userIdentifier,
+  @tournID	userIdentifier,
+  @td		bit=0,
+  @teamMate	userIdentifier = NULL
+)
+AS
+BEGIN
+  DECLARE @lastError	integer
+  DECLARE @status	integer
+  DECLARE @rating	integer
+  DECLARE @buyIn	integer
+  DECLARE @currencyType	tinyint
+  DECLARE @notifyID	userIdentifier
+  DECLARE @gameTypeID	userIdentifier
+  DECLARE @player	userIdentifier
+  DECLARE @nickName	VPuserID
+
+  BEGIN TRAN
+    SELECT @status = NULL
+    SELECT @status = status, @notifyID = notifyID,
+             @currencyType = currencyType, @buyIn = buyIn
+      FROM tournaments
+      WHERE tournID = @tournID
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN @lastError
+    END
+
+    IF @status IS NULL
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN 20000
+    END
+
+    /* Invalid tournament event ID ? */
+    IF @status != 1
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN 20002
+    END
+
+    /* Tournament is full ? */
+    IF NOT EXISTS (SELECT * FROM brackets
+			WHERE tournID = @tournID
+			AND   round = 1
+			AND   (player IS NULL OR player = 0))
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN 20001
+    END
+
+    /* Not a member of this ladder ? */
+    IF NOT EXISTS (SELECT * FROM ladderMembers
+			WHERE notifyID = @notifyID
+			AND   userID   = @userID)
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN 20004
+    END
+
+    /* Already registered for this tournament ? */
+    IF EXISTS (SELECT * FROM tournamentPlayers
+			  WHERE tournID = @tournID
+			  AND   userID  = @userID
+                          AND   td      = @td)
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN 20003
+    END
+    IF EXISTS (SELECT * FROM teamMates
+			  WHERE tournID = @tournID
+			  AND   userID  = @userID)
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN 20003
+    END
+
+    /* Teammate already registered for this tournament ? */
+    IF @teamMate IS NOT NULL
+    BEGIN
+      IF EXISTS (SELECT * FROM tournamentPlayers
+			    WHERE tournID = @tournID
+			    AND   userID  = @teamMate
+                            AND   td      = @td)
+      BEGIN
+        ROLLBACK TRAN 
+        RETURN 20009
+      END
+      IF EXISTS (SELECT * FROM teamMates
+			    WHERE tournID = @tournID
+			    AND   userID  = @teamMate)
+      BEGIN
+        ROLLBACK TRAN 
+        RETURN 20009
+      END
+
+      IF @userID = @teamMate
+      BEGIN
+        ROLLBACK TRAN 
+        RETURN 20010
+      END
+    END
+
+    /* Already registered for another tournament for the
+     * same game type, but a different ladder.
+     */
+    SELECT @gameTypeID = gameTypeID
+      FROM ladders
+      WHERE notifyID = @notifyID
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN @lastError
+    END
+
+    IF EXISTS (SELECT *
+                 FROM tournamentPlayers p, tournaments t, ladders l
+                 WHERE p.tournID = @tournID
+                 AND   p.tournID = t.tournID
+                 AND   t.notifyID = l.notifyID
+                 AND   userID = @userID
+                 AND   td = 0
+                 AND   t.notifyID != @notifyID
+                 AND   (status != 0x04 AND status != 0x08)
+                 AND   gameTypeID = @gameTypeID)
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN 20007
+    END
+
+    IF EXISTS (SELECT *
+                 FROM teamMates p, tournaments t, ladders l
+                 WHERE p.tournID = @tournID
+                 AND   p.tournID = t.tournID
+                 AND   t.notifyID = l.notifyID
+                 AND   userID = @userID
+                 AND   t.notifyID != @notifyID
+                 AND   (status != 0x04 AND status != 0x08)
+                 AND   gameTypeID = @gameTypeID)
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN 20007
+    END
+
+    /*
+     * If there is a buy in cost, debit the player's points.
+     * - except if this is a TD.
+     * 
+     * If this is a team mate, defer the debit until the team mate 
+     * confirms participation.
+     */
+    IF @buyIn IS NOT NULL AND @buyIn > 0 AND @td = 0
+    BEGIN
+      IF @currencyType = 0
+      BEGIN
+        DECLARE @cost smallmoney
+        SELECT @cost = 0 - @buyIn
+        EXEC @lastError = vpusers..updateUserPoints @userID, @cost
+        IF @@trancount = 0 OR @lastError != 0
+        BEGIN
+          IF @@trancount > 0
+            ROLLBACK TRAN
+          RETURN 20005
+        END
+      END
+      ELSE BEGIN
+        ROLLBACK TRAN
+        RETURN 20006
+      END
+    END
+
+    SELECT @rating = rating
+      FROM players p, ladders l
+      WHERE userID = @userID
+      AND   notifyID = @notifyID
+      AND   p.gameTypeID = l.gameTypeID
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN @lastError
+    END
+
+    IF @rating IS NULL
+    BEGIN
+      SELECT @rating = 1500	-- unrated player
+    END
+
+    INSERT tournamentPlayers (tournID, userID, initialRating, won, lost, tied, td, buyIn, prizeShare, quit)
+        VALUES(@tournID, @userID, @rating, 0,0,0, @td, @buyIn, 0, 0)
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN @lastError
+    END
+
+    /* 
+     * If a team mate was specified, add the player to the teamMates
+     * table. However, we don't debit the buy in cost here. That is 
+     * deferred until the team mate confirms participation.
+     */
+    IF @teamMate IS NOT NULL
+    BEGIN
+
+      /* Not a member of this ladder ? */
+      IF NOT EXISTS (SELECT * FROM ladderMembers
+			WHERE notifyID = @notifyID
+			AND   userID   = @teamMate)
+      BEGIN
+        ROLLBACK TRAN 
+        RETURN 20008
+      END
+
+      SELECT @rating = rating
+        FROM players p, ladders l
+        WHERE userID = @teamMate
+        AND   notifyID = @notifyID
+        AND   p.gameTypeID = l.gameTypeID
+
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN 
+        RETURN @lastError
+      END
+
+      IF @rating IS NULL
+      BEGIN
+        SELECT @rating = 1500	-- unrated player
+      END
+
+      INSERT teamMates (tournID, userID, priUserID, initialRating, buyIn, confirmed, quit)
+        VALUES(@tournID, @teamMate, @userID, @rating, @buyIn, 0, 0)
+
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN 
+        RETURN @lastError
+      END
+    END
+
+    /* If this is a TD, don't update the seeds or brackets */
+
+    IF @td = 1
+    BEGIN
+      COMMIT TRAN
+      RETURN 0
+    END
+
+    /* update the default seedings for the first round bracket */
+
+    DECLARE playerCursor CURSOR
+      FOR SELECT userID, initialRating
+        FROM tournamentPlayers
+        WHERE tournID = @tournID
+        AND        td = 0
+        ORDER BY initialRating DESC
+
+    DECLARE @i integer
+    SELECT @i = 1
+    OPEN playerCursor
+    FETCH playerCursor INTO @player, @rating
+    WHILE ( @@sqlstatus = 0 ) 
+    BEGIN
+      UPDATE brackets
+        SET player = @player
+        WHERE tournID = @tournID
+        AND   round = 1
+        AND   seed  = @i
+
+        SELECT @lastError = @@error
+        IF @lastError != 0
+        BEGIN
+          CLOSE playerCursor
+          ROLLBACK TRAN 
+          RETURN @lastError
+        END
+
+        FETCH playerCursor INTO @player, @rating
+        SELECT @i = @i + 1
+    END
+    CLOSE playerCursor
+    
+  COMMIT TRAN
+
+  SELECT @nickName = nickName FROM vpusers..users WHERE userID=@userID
+  EXEC addTournamentMsg @tournID, 0, 8, @nickName
+  EXEC vpusers..addAcctHistory @userID, 68, @tournID
+END
+GO

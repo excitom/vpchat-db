@@ -1,0 +1,10 @@
+CREATE TABLE referralHistory
+(
+	itemID		userIdentifier			IDENTITY
+                        	constraint isPrimary primary key,
+	accountID	userIdentifier			NOT NULL,
+	processDate	VpTime				NOT NULL,
+	amount		smallmoney			NOT NULL,
+	type		tinyint				NOT NULL
+)
+GO

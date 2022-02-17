@@ -1,0 +1,12 @@
+/* display all users in with names starting with a given prefix */
+/* input:  prefix, registration mode (default=2)
+   output: list of all matching nicknames (with userID) */
+CREATE PROC showUsersByPrefix ( @prefix VPuserID, @registrationMode int = 2 )
+AS
+BEGIN
+  SELECT nickName, userID
+    FROM users
+    WHERE ( registrationMode = @registrationMode ) AND
+          ( nickName like ( @prefix + "%" ) )
+END
+GO

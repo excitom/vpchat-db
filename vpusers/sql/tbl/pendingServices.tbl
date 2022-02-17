@@ -1,0 +1,19 @@
+/*
+ * This table keeps track of add-on services for a user account
+ * that have not yet been paid for. If the user changes his mind
+ * and backs out the change, this table will provide the exact 
+ * refund amount. It's necessary to store, rather than compute, this
+ * amount since it is pro-rated based on the date relative to the 
+ * renewal date of the account.
+ *
+ */
+CREATE TABLE pendingServices
+(
+	serviceID		userIdentifier			NOT NULL
+                        	constraint isPrimary primary key,
+	upgradeCost		smallmoney			NOT NULL
+)
+ON userDetailsSeg
+GO
+GRANT SELECT ON pendingServices TO audset
+GO

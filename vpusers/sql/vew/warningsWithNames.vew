@@ -1,0 +1,11 @@
+CREATE VIEW warningsWithNames
+AS
+  SELECT warningID AS Id, 
+         users.nickName AS Name, users.registrationMode AS Mode,
+         issuedOn,
+         u1.nickName AS issuer,
+         u1.registrationMode AS issuerMode
+  FROM warnings, users, users u1
+  WHERE warnings.userID = users.userID AND
+        warnings.issuedBy = u1.userID
+GO

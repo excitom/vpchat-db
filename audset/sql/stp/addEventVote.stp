@@ -1,0 +1,20 @@
+/* Adds an event vote description to the eventVotes table */
+/* input:  eventId, vote title, vote description, number of choices allowed. 
+   output: the id assigned to this vote
+*/
+CREATE PROC addEventVote
+(
+  @eventID		eventIdentifier,
+  @title		varchar(50),
+  @description          varchar(200),
+  @numChoices		integer
+)
+AS
+BEGIN
+  INSERT INTO eventVotes 
+      ( eventID, title, description, numChoices, status)
+    VALUES ( @eventID, @title, @description, @numChoices, 0)
+
+  SELECT @@identity
+END    
+GO

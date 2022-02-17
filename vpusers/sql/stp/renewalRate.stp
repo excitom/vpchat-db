@@ -1,0 +1,39 @@
+/*
+ * Calculate the renewal rate for user accounts
+ */
+CREATE PROC renewalRate ( @activeOnly bit = 0 )
+AS
+BEGIN
+  DECLARE @accounts INTEGER
+  DECLARE @renewed INTEGER
+  IF @activeOnly = 1
+  BEGIN
+    SELECT @accounts = COUNT(userAccounts.accountID)
+      FROM userAccounts, renewals
+      WHERE userAccounts.accountID=renewals.accountID
+      AND accountStatus = 0
+
+    SELECT @renewed = COUNT(userAccounts.accountID)
+      FROM userAccounts, renewals
+      WHERE userAccounts.accountID=renewals.accountID
+      AND accountStatus = 0
+      AND renewals > 0
+  END
+  ELSE BEGIN
+    SELECT @accounts = COUNT(userAccounts.accountID)
+      FROM userAccounts, renewals
+      WHERE userAccounts.accountID=renewals.accountID
+      AND accountStatus != 1
+
+    SELECT @renewed = COUNT(userAccounts.accountID)
+      FROM userAccounts, renewals
+      WHERE userAccounts.accountID=renewals.accountID
+      AND accountStatus != 1
+      AND renewals > 0
+  END
+
+  DECLARE @rate FLOAT
+  SELECT @rate = CONVERT(FLOAT, @renewed) / CONVERT(FLOAT, @accounts)
+  SELECT @rate
+END
+GO

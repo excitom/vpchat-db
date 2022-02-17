@@ -1,0 +1,40 @@
+/*
+ * This table keeps track of add-on services for a user account.
+ *
+ * Note: This is different than a "service" that is a server process,
+ *       e.g. the registerNewService stored procedure. 
+ *
+ * Some servies, like personal alert lists, involve an object in
+ * another table or database. The itemID points to this object. Other
+ * services, like email forwarding and web space, only involve an
+ * integer quantity (e.g. number of names that can forward, megabytes
+ * of extra space). These services use the quantity column rather than
+ * the itemID column.
+ *
+ */
+CREATE TABLE services
+(
+	serviceID		userIdentifier			IDENTITY
+                        	constraint isPrimary primary key,
+	accountID		userIdentifier			NOT NULL,
+	itemID			userIdentifier			NULL,
+	bundleID		userIdentifier			NULL,
+	unitCost		smallmoney			NOT NULL,
+	creationDate		VpTime				NOT NULL,
+	quantity		integer				NULL,
+	type			smallint			NOT NULL,
+	-- 1 = notify (alert) list
+	-- 2 = web page space
+	-- 3 = email forwarding
+	-- 4 = bundle of 1-3
+	-- 5 = presence group
+	-- 6 = game ladder
+	status			tinyInt				NOT NULL,
+	-- 0 = OK
+	-- 1 = waiting payment
+	locked			bit
+)
+ON userDetailsSeg
+GO
+GRANT SELECT ON services TO audset
+GO

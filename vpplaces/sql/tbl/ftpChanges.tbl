@@ -1,0 +1,27 @@
+/*
+ * FTP server programs run on multiple front end web servers.
+ * When changes are made to user home pages that also require
+ * a change to the FTP servers' user files, this table is used.
+ * A change record is added for each front end server. Scripts
+ * running on each front end server pull change records from
+ * the table.
+ *
+ * The purpose of the identity primary key is to ensure that
+ * changes can be extracted in chronological order.
+ */
+CREATE TABLE ftpChanges
+(
+	changeID	userIdentifier	IDENTITY
+                        constraint isPrimary primary key,
+	change		char(1)		NOT NULL,
+	-- A = add a new user
+	-- U = update user record
+	-- P = change user password
+	-- D = delete a user
+	server		longName	NOT NULL,
+	nickName	VPuserID	NULL,
+	pwEntry		longName	NULL
+)
+GO
+GRANT SELECT on ftpChanges TO vpusr
+GO

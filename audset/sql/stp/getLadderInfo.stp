@@ -1,0 +1,83 @@
+/*
+ * Return a information about a game ladder
+ *
+ */
+IF EXISTS
+ (SELECT name FROM sysobjects WHERE name='getLadderInfo' AND type = 'P')
+  DROP PROC getLadderInfo
+GO
+CREATE PROC getLadderInfo (
+	@ladderName	longName
+)
+AS
+BEGIN
+  DECLARE @notifyID     userIdentifier
+  DECLARE @subheader    longName
+  DECLARE @gameName     longName
+  DECLARE @URL          longName
+  DECLARE @imageURL     longName
+  DECLARE @unlisted     bit
+  DECLARE @approvalRqd  bit
+  DECLARE @adultContent bit
+  DECLARE @closed       bit
+  DECLARE @locked       bit
+  DECLARE @createdDate  VpTime
+  DECLARE @scoreFmt	tinyint
+
+  IF EXISTS( SELECT * FROM ladders WHERE ladderName = @ladderName)
+  BEGIN
+    SELECT @notifyID     = n.notifyID,
+	   @subheader    = subheader,
+	   @gameName     = gameName, 
+      	   @URL          = URL,
+	   @imageURL     = imageURL,
+	   @unlisted     = unlisted,
+	   @approvalRqd  = approvalRqd,
+	   @adultContent = adultContent,
+	   @closed       = closed,
+	   @locked       = locked,
+      	   @createdDate  = createdDate,
+	   @scoreFmt     = scoreFmt
+      FROM notifyLists n, privateLists p, ladders l, gameTypes g
+      WHERE ladderName = @ladderName
+      AND   n.notifyID = p.notifyID
+      AND   n.notifyID = l.notifyID
+      AND   l.gameTypeID = g.gameTypeID
+
+    DECLARE @nickName VPuserID
+    SELECT @nickName = nickName
+      FROM vpusers..users u, vpusers..registration r,
+	vpusers..userAccounts a, vpusers..services s
+      WHERE s.itemID = @notifyID
+      AND   s.type = 6
+      AND   s.accountID = a.accountID
+      AND   a.ownerID = u.userID
+      AND   registrationMode = 2
+
+    DECLARE @members int
+    SELECT @members = COUNT(userID)
+      FROM ladderMembers
+      WHERE notifyID = @notifyID
+      AND pending = 0
+
+    DECLARE @pending int
+    SELECT @pending = COUNT(userID)
+      FROM ladderMembers
+      WHERE notifyID = @notifyID
+      AND pending = 1
+
+    SELECT @notifyID AS notifyID,
+	@ladderName AS ladderName, @subheader AS subheader,
+	@gameName AS gameName, @URL AS URL, @imageURL AS imageURL,
+	@unlisted AS unlisted, @approvalRqd AS approvalRqd,
+	@adultContent AS adultContent, @closed AS closed, @locked AS locked,
+	@createdDate AS createdDate, @nickName AS ownerName,
+	@members AS members, @pending AS pending, @scoreFmt AS scoreFmt
+
+  END
+  ELSE BEGIN
+    RETURN 20000
+  END
+
+END
+GO

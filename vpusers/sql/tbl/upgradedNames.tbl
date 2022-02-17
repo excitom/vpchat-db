@@ -1,0 +1,11 @@
+/*
+ * keep track of names that had been part of an account and
+ * were subsequently upgraded to account owner
+ */
+CREATE TABLE upgradedNames
+(
+	accountID		userIdentifier		NOT NULL
+                        	constraint isPrimary primary key,
+	oldAccountID		userIdentifier		NOT NULL
+)
+GO

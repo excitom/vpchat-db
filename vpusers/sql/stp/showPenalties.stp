@@ -1,0 +1,226 @@
+/* --- show all penalties (active and expired) and warnings for all users --- */
+/* this is an interface for calling from an HTML GUI */
+CREATE PROC showPenalties
+( 
+  @showPen bit,
+  @showWarn bit,
+  @showExpired bit,
+  @sortBy varchar(20) /* currently ignored */
+)
+AS
+BEGIN
+  /* make it case insensitive */
+  /*
+  SELECT @sortBy = upper(@sortBy)
+  */
+
+  DECLARE @lastError int
+  DECLARE @diffFromGMT int
+  DECLARE @now smalldatetime
+  
+  BEGIN TRAN
+    SELECT @diffFromGMT = gmt
+      FROM getGMT
+    IF @diffFromGMT IS NULL
+      SELECT @diffFromGMT = 0
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    SELECT @now = dateadd( hour, (-1) * @diffFromGMT, getdate() )
+
+    /* ------------------------ 1 ------------------------ */
+    IF ( ( @showPen = 1 ) AND ( @showWarn = 1 ) AND ( @showExpired = 1 ) )
+    BEGIN
+      SELECT Id, Name, Mode,
+             Penalty, issuedOn AS "Issued On", 
+             issuer AS "Issued By", issuerMode AS "Reg.Mode",
+             ( (1-forgiven) * 
+               (sign(sign(datediff(minute,@now,expiresOn))-1)+1))
+               AS "In Effect"
+        FROM penaltiesWithNames
+      UNION
+      SELECT Id, Name, Mode,
+             Penalty, issuedOn AS "Issued On", 
+             issuer AS "Issued By", issuerMode AS "Reg.Mode",
+             0 AS "In Effect"
+        FROM historyWithNames
+      UNION
+      SELECT Id, Name, Mode,
+          "Warn" AS Penalty,
+          issuedOn AS "Issued On", 
+          issuer AS "Issued By", issuerMode AS "Reg.Mode",
+          0 AS "In Effect"
+        FROM warningsWithNames
+        ORDER BY Name
+      
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+      COMMIT TRAN
+      RETURN
+    END
+  
+    /* ------------------------ 2 ------------------------ */
+    IF ( ( @showPen = 1 ) AND ( @showWarn = 1 ) )
+    BEGIN
+      SELECT Id, Name, Mode,
+             Penalty, issuedOn AS "Issued On", 
+             issuer AS "Issued By", issuerMode AS "Reg.Mode",
+             1 AS "In Effect"
+        FROM penaltiesWithNames
+        WHERE NOT ( ( forgiven = 1 ) OR ( @now > expiresOn ) )
+      UNION
+      SELECT Id, Name, Mode,
+          "Warn" AS Penalty,
+          issuedOn AS "Issued On", 
+          issuer AS "Issued By", issuerMode AS "Reg.Mode",
+          0 AS "In Effect"
+        FROM warningsWithNames
+      ORDER BY Name
+      
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+      COMMIT TRAN
+      RETURN
+    END
+  
+    /* ------------------------ 3 ------------------------ */
+    IF ( ( @showPen = 1 ) AND ( @showExpired = 1 ) )
+    BEGIN
+      SELECT Id, Name, Mode,
+             Penalty, issuedOn AS "Issued On", 
+             issuer AS "Issued By", issuerMode AS "Reg.Mode",
+             ( (1-forgiven) * 
+               (sign(sign(datediff(minute,@now,expiresOn))-1)+1))
+               AS "In Effect"
+        FROM penaltiesWithNames
+      UNION
+      SELECT Id, Name, Mode,
+             Penalty, issuedOn AS "Issued On", 
+             issuer AS "Issued By", issuerMode AS "Reg.Mode",
+             0 AS "In Effect"
+        FROM historyWithNames
+      ORDER BY Name
+      
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+      COMMIT TRAN
+      RETURN
+    END
+  
+    /* ------------------------ 4 ------------------------ */
+    IF ( ( @showWarn = 1 ) AND ( @showExpired = 1 ) )
+    BEGIN
+      SELECT Id, Name, Mode,
+             Penalty, issuedOn AS "Issued On", 
+             issuer AS "Issued By", issuerMode AS "Reg.Mode",
+             0 AS "In Effect"
+        FROM penaltiesWithNames
+        WHERE ( ( forgiven = 1 ) OR ( @now > expiresOn ) )
+      UNION
+      SELECT Id, Name, Mode,
+          "Warn" AS Penalty,
+          issuedOn AS "Issued On", 
+          issuer AS "Issued By", issuerMode AS "Reg.Mode",
+          0 AS "In Effect"
+        FROM warningsWithNames
+      ORDER BY Name
+      
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+      COMMIT TRAN
+      RETURN
+    END
+  
+    /* ------------------------ 5 ------------------------ */
+    IF @showPen = 1
+    BEGIN
+      SELECT Id, Name, Mode,
+             Penalty, issuedOn AS "Issued On", 
+             issuer AS "Issued By", issuerMode AS "Reg.Mode",
+             1 AS "In Effect"
+        FROM penaltiesWithNames
+        WHERE NOT ( ( forgiven = 1 ) OR ( @now > expiresOn ) )
+        ORDER BY Name
+      
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+      COMMIT TRAN
+      RETURN
+    END
+  
+    /* ------------------------ 6 ------------------------ */
+    IF @showWarn = 1
+    BEGIN
+      SELECT Id, Name, Mode,
+          "Warn" AS Penalty,
+          issuedOn AS "Issued On", 
+          issuer AS "Issued By", issuerMode AS "Reg.Mode",
+          0 AS "In Effect"
+        FROM warningsWithNames
+      ORDER BY Name
+      
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+      COMMIT TRAN
+      RETURN
+    END
+  
+    /* ------------------------ 7 ------------------------ */
+    IF @showExpired = 1
+    BEGIN
+      SELECT Id, Name, Mode,
+             Penalty, issuedOn AS "Issued On", 
+             issuer AS "Issued By", issuerMode AS "Reg.Mode",
+             0 AS "In Effect"
+        FROM penaltiesWithNames
+        WHERE ( ( forgiven = 1 ) OR ( @now > expiresOn ) )
+      UNION
+      SELECT Id, Name, Mode,
+             Penalty, issuedOn AS "Issued On", 
+             issuer AS "Issued By", issuerMode AS "Reg.Mode",
+             0 AS "In Effect"
+        FROM historyWithNames
+      ORDER BY Name
+      
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+      COMMIT TRAN
+      RETURN
+    END
+
+  COMMIT TRAN
+END
+GO 

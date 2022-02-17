@@ -1,0 +1,71 @@
+/*
+ * Determine the prize value for a tournament
+ *
+ * Input: tournID
+ *
+ * Output: 0 = success
+ *         20000 = no such tournament
+ */
+IF EXISTS
+ (SELECT name FROM sysobjects WHERE name = 'getPrize' AND type = 'P')
+ DROP PROC getPrize
+GO
+CREATE PROC getPrize (
+  @tournID	userIdentifier
+)
+AS
+BEGIN
+  DECLARE @status	int
+  DECLARE @players	int
+  DECLARE @teamMates	int
+  DECLARE @currencyType	int
+  DECLARE @scoreFmt	int
+  DECLARE @buyIn	smallmoney
+  DECLARE @addedValue	smallmoney
+  DECLARE @prize	smallmoney
+  DECLARE @notifyID	userIdentifier
+
+  SELECT @status = status, @players = players, @currencyType = currencyType,
+         @buyIn = buyIn, @addedValue = addedValue, @notifyID = notifyID
+    FROM tournaments
+    WHERE tournID = @tournID
+
+  IF @status IS NULL
+    RETURN 20000
+
+  SELECT @scoreFmt = scoreFmt
+    FROM gameTypes g, ladders l
+    WHERE notifyID = @notifyID
+    AND l.gameTypeID = g.gameTypeID
+
+  /* If open for registration use the potential number of players
+   * to calculate the prize, else use the acutal number of players
+   * who registered (the difference is BYEs, which don't contribute
+   * to the prize).
+   */
+  IF @status = 1
+  BEGIN
+    /* If team game, twice as many players */
+    IF @scoreFmt = 3
+      SELECT @prize = (@players * @buyIn * 2) + @addedValue
+    ELSE
+      SELECT @prize = (@players * @buyIn) + @addedValue
+  END
+  ELSE BEGIN
+    SELECT @prize = SUM(buyIn)
+      FROM tournamentPlayers
+      WHERE tournID = @tournID
+      AND        td = 0
+    IF @scoreFmt = 3
+    BEGIN
+      SELECT @prize = @prize + SUM(buyIn)
+        FROM teamMates
+        WHERE tournID = @tournID
+    END
+    SELECT @prize = @prize + @addedValue
+  END
+
+  SELECT @prize AS prize, @currencyType AS currencyType
+
+END
+GO

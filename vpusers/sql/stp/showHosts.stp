@@ -1,0 +1,9 @@
+/* show names of all users with host privilege, sorted by user name --- */
+/* this stored procedure is meant to be called from the audset database */
+CREATE PROC showHosts
+AS
+  SELECT nickName, registrationMode
+    FROM userPrivileges, users
+    WHERE userPrivileges.userID = users.userID AND
+          userPrivileges.privilegeType = 273
+GO

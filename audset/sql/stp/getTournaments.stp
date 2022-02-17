@@ -1,0 +1,38 @@
+/*
+ * Get a list of game ladder tournaments
+ *
+ * Input: Status (Boolean mask)
+ *        1  = open for registration
+ *        2  = started
+ *        4  = finished
+ *        8  = cancelled
+ *	  0x10 = registration closed
+ *	  0x20 = between rounds
+ *	  0x40 = finished, pending prize award
+ *        Type (Boolean mask)
+ *        1 = single elimination
+ *        2 = double elimination
+ *        4 = round robin
+ *        8 = swiss
+ *
+ */
+IF EXISTS
+ (SELECT name FROM sysobjects WHERE name = 'getTournaments' AND type = 'P') 
+ DROP PROC getTournaments
+GO  
+CREATE PROC getTournaments (
+	@status tinyint = 0x1F,
+	@type   tinyint = 0xF
+)
+AS
+BEGIN
+  SELECT tournID, t.notifyID, title, ladderName, type, status, t.players,
+	startTime, timeLimit, currencyType, addedValue, buyIn,
+        g.gameTypeID, gameName
+    FROM tournaments t, ladders l, gameTypes g
+    WHERE status & @status > 0
+    AND   type   & @type   > 0
+    AND   t.notifyID = l.notifyID
+    AND   l.gameTypeID = g.gameTypeID
+END
+GO

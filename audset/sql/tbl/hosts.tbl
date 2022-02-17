@@ -1,0 +1,7 @@
+CREATE TABLE hosts
+(
+	userID		userIdentifier			NOT NULL,
+	auditoriumID	numeric(6,0)			NULL,
+	eventID		numeric(10,0)			NULL
+)
+GO

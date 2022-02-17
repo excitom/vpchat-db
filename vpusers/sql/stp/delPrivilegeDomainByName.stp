@@ -1,0 +1,33 @@
+/* delete a privilege domain for a specific user
+
+   INPUT  : user name, domain, reg. mode (default 2)
+   OUTPUT : return value - 0 - successfull
+        
+*/
+CREATE PROC delPrivilegeDomainByName
+(
+  @nickName VPuserID,
+  @domain UrlType,
+  @regMode VpRegMode = 2
+)
+AS
+BEGIN
+  DECLARE @lastError int
+  
+  BEGIN TRAN delPrivilegeDomainByName
+    DELETE privilegeDomains
+    FROM privilegeDomains, users
+      WHERE ( privilegeDomains.userID = users.userID ) AND
+            ( nickName = @nickName ) AND
+            ( registrationMode = @regMode ) AND
+            ( domain = @domain )
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN delPrivilegeDomainByName
+      RETURN @lastError
+    END
+  COMMIT TRAN delPrivilegeDomainByName
+END
+GO

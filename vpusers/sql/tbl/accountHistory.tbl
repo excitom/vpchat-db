@@ -1,0 +1,22 @@
+/* 
+ * Historical record of account activity for statistical purposes.
+ *
+ * This information complements the activityLog table. Records in
+ * this table result from system actions. Records in the activityLog
+ * result from user actions. There may be overlap, e.g. a record in
+ * each table relating to the same event.
+ *
+ * Reason codes:
+ *	Use the showAcctHistoryDescr stored procedure to see the full
+ *      list, or SELECT reason,comment FROM accountHistory WHERE accountID=0
+ */
+CREATE TABLE accountHistory
+(
+	accountID	userIdentifier			NOT NULL,
+        time		datetime			NOT NULL,
+	reason		smallint			NOT NULL,
+	value		userIdentifier	DEFAULT 0	NOT NULL,
+	comment		varchar(255)			NULL
+)
+ON userDetailsSeg
+GO

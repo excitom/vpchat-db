@@ -1,0 +1,150 @@
+/*
+ * Determine if a new account is eligible for a free trial. Criteria are:
+ * Unique email (not in another cc or ec record)
+ * Unique cc number
+ *
+ * If a match is found, but the info was added by this accountID, then
+ * let it pass. Two possible reasons for this are:
+ * - Hitting reload or backing up during the sign up process.
+ * - Trying one card, getting rejected authorization, trying another card.
+ * 
+ * Input: credit card number, email, accountID
+ *
+ * Output: 0 - OK, eligible
+ *         1 - dup cc email
+ *         2 - dup ec email
+ *         3 - dup cc number
+ *
+ * Also, the ccID sent to output if rc > 0
+ *
+ */
+CREATE PROC ftEligible ( 
+	@Ecom_online_email	VARCHAR(75),
+	@accountID		userIdentifier,
+	@Ecom_card_number	VARCHAR(19)
+)
+AS
+BEGIN
+  DECLARE @ccID 	userIdentifier
+  DECLARE @lastError	int
+  DECLARE @dupOK	bit
+
+  BEGIN TRAN
+    
+    /*
+     * check for dup cc number 
+     */
+    SELECT  @ccID = ccID
+      FROM creditCards
+      WHERE Ecom_card_number = @Ecom_card_number
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    IF @ccID IS NOT NULL
+    BEGIN
+      /*
+       * dup ok if this accountID added it
+       */
+      IF EXISTS (
+       SELECT * FROM accountHistory
+       WHERE accountID = @accountID AND reason = 36 AND value = @ccID
+      )
+      BEGIN
+        SELECT @dupOK = 1
+      END
+      ELSE BEGIN
+        SELECT @dupOK = 0
+      END
+    
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+
+      IF @dupOK = 0
+      BEGIN
+        ROLLBACK TRAN
+        SELECT @ccID
+        RETURN 3
+      END
+    END
+
+    /*
+     * check for dup cc email
+     */
+    SELECT @ccID = NULL
+    SELECT @ccID = ccID
+      FROM creditCards
+      WHERE Ecom_billto_online_email = @Ecom_online_email
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    IF @ccID IS NOT NULL
+    BEGIN
+      /*
+       * dup ok if this accountID added it
+       */
+      IF EXISTS (
+       SELECT * FROM accountHistory
+       WHERE accountID = @accountID AND reason = 36 AND value = @ccID
+      )
+      BEGIN
+        SELECT @dupOK = 1
+      END
+      ELSE BEGIN
+        SELECT @dupOK = 0
+      END
+    
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+
+      IF @dupOK = 0
+      BEGIN
+        ROLLBACK TRAN
+        SELECT @ccID
+        RETURN 1
+      END
+    END
+
+    /*
+     * check for dup ec email
+     */
+    SELECT @ccID = NULL
+    SELECT @ccID = ecID
+      FROM echecks
+      WHERE Ecom_billto_online_email = @Ecom_online_email
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    IF @ccID IS NOT NULL
+    BEGIN
+      ROLLBACK TRAN
+      SELECT @ccID
+      RETURN 2
+    END
+
+  COMMIT TRAN
+  RETURN 0
+END
+GO

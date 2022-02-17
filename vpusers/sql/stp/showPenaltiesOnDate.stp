@@ -1,0 +1,174 @@
+/* --- show all penalties (active and expired) and warnings for all users --- */
+/* this is an interface for calling from an HTML GUI
+ *
+ * There are potentially two different time zones involved, for the 
+ * web page user and for the server on which the database is running.
+ * Penalty times are saved in GMT. To determine is a penalty is expired,
+ * we need to determine "now" relative to the server on which the database
+ * is running. When we present the expiration time/date, we want to 
+ * adjust for the time zone of the web page user.
+ *
+ * The input parameter is the time zone of the web page user.
+ *
+ */
+CREATE PROC showPenaltiesOnDate
+( 
+  @when smalldatetime,
+  @sortBy int,
+  @clientTZ int
+)
+AS
+BEGIN
+  /* sortBy 
+  	1 = victim
+	2 = date/time
+	3 = host
+  */
+
+  DECLARE @lastError int
+  DECLARE @now smalldatetime
+  DECLARE @start smalldatetime
+  DECLARE @end smalldatetime
+  DECLARE @diffFromGMT int
+
+  SELECT @diffFromGMT = gmt
+    FROM getGMT
+  IF @diffFromGMT IS NULL
+    SELECT @diffFromGMT = 0
+    
+  SELECT @lastError = @@error
+  IF @lastError != 0
+  BEGIN
+    RETURN @lastError
+  END
+  
+    SELECT @now = dateadd( hour, (-1) * @diffFromGMT, getdate() )
+    SELECT @start = dateadd( hour, (-1) * @diffFromGMT,  
+ 
+	 @when )
+    SELECT @end = dateadd( hour, 24, @start )
+
+    /* ------------------------ sort by victim ------------------------ */
+    IF ( @sortBy = 1 )
+    BEGIN
+      SELECT Name, 
+             Penalty, 
+             dateadd( hour, (@clientTZ), issuedOn) AS "Issued On", 
+             issuer AS "Issued By", 
+             ( (1-forgiven) * 
+               (sign(sign(datediff(minute,@now,expiresOn))-1)+1))
+               AS "In Effect",
+             dateadd( hour, (@clientTZ), expiresOn) AS "Expires On",
+             comment
+        FROM penaltiesWithNames
+	WHERE issuedOn >= @start
+	AND issuedOn <= @end
+	 
+      UNION
+      SELECT Name, 
+             Penalty, 
+             dateadd( hour, (@clientTZ), issuedOn) AS "Issued On", 
+             issuer AS "Issued By", 
+             0 AS "In Effect",
+             dateadd( hour, (@clientTZ), expiresOn) AS "Expires On",
+             comment
+        FROM historyWithNames
+	WHERE issuedOn >= @start
+	AND issuedOn <= @end
+        ORDER BY Name
+      
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+      COMMIT TRAN
+      RETURN
+    END
+
+    /* ----------------------- sort by date/time  ------------------------ */
+	 
+    IF ( @sortBy = 2 )
+    BEGIN
+      SELECT Name, 
+             Penalty, 
+             dateadd( hour, (@clientTZ), issuedOn) AS "Issued On", 
+             issuer AS "Issued By", 
+             ( (1-forgiven) * 
+               (sign(sign(datediff(minute,@now,expiresOn))-1)+1))
+               AS "In Effect",
+             dateadd( hour, (@clientTZ), expiresOn) AS "Expires On",
+             comment
+        FROM penaltiesWithNames
+	WHERE issuedOn >= @start
+	AND issuedOn <= @end
+      UNION
+      SELECT Name, 
+             Penalty, 
+             dateadd( hour, (@clientTZ), issuedOn) AS "Issued On", 
+             issuer AS "Issued By", 
+             0 AS "In Effect",
+             dateadd( hour, (@clientTZ), expiresOn) AS "Expires On",
+             comment
+        FROM historyWithNames
+	WHERE issuedOn >= @start
+	AND issuedOn <= @end
+        ORDER BY dateadd( hour, (@clientTZ), issuedOn) 
+      
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+      COMMIT TRAN
+      RETURN
+    END
+
+    /* ------------------------ sort by host ------------------------ */
+  
+ 
+	    IF ( @sortBy = 3 )
+    BEGIN
+      SELECT Name, 
+             Penalty, 
+             dateadd( hour, (@clientTZ), issuedOn) AS "Issued On", 
+             issuer AS "Issued By", 
+             ( (1-forgiven) * 
+               (sign(sign(datediff(minute,@now,expiresOn))-1)+1))
+               AS "In Effect",
+             dateadd( hour, (@clientTZ), expiresOn) AS "Expires On",
+             comment
+        FROM penaltiesWithNames
+	WHERE issuedOn >= @start
+	AND issuedOn <= @end
+      UNION
+      SELECT Name, 
+             Penalty, 
+             dateadd( hour, (@clientTZ), issuedOn) AS "Issued  On", 
+             issuer AS "Issued By", 
+             0 AS "In Effect",
+             dateadd( hour, (@clientTZ), expiresOn) AS "Expires On",
+             comment
+        FROM historyWithNames
+	WHERE issuedOn >= @start
+	AND issuedOn <= @end
+        ORDER BY issuer
+      
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+   
+ 
+	       ROLLBACK TRAN
+        RETURN @lastError
+      END
+      COMMIT TRAN
+      RETURN
+    END
+  
+
+  COMMIT TRAN
+END
+GO

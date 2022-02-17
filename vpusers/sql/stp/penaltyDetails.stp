@@ -1,0 +1,27 @@
+/* show the details of one penalty (active or expired) --- */
+/* this is an interface for calling from an HTML GUI */
+CREATE PROC penaltyDetails
+(
+  @penaltyID integer
+)
+AS
+BEGIN
+  SELECT users.nickName, users.registrationMode, 
+         expiresOn, issuedOn, 
+         u1.nickName AS whoIssued, u1.registrationMode AS issuerMode, 
+         forgiven, comment
+    FROM penalties, users, users u1
+    WHERE penalties.penaltyID = @penaltyID AND
+          penalties.userID = users.userID  AND
+          penalties.issuedBy = u1.userID
+  UNION
+  SELECT users.nickName, users.registrationMode, 
+         expiresOn, issuedOn, 
+         u1.nickName AS whoIssued, u1.registrationMode AS issuerMode, 
+         forgiven, comment
+    FROM history, users, users u1
+    WHERE history.penaltyID = @penaltyID AND
+          history.userID = users.userID  AND
+          history.issuedBy = u1.userID
+END
+GO

@@ -1,0 +1,58 @@
+/* add a name to the banned names list */
+/* input:  nickName, is it banned, is it filtered
+   output: return value - 
+           0 - success,
+           20001 - if name is already in list
+           20002 - if name is prefix of "guest" 
+                   (to allow automatic naming of guests)
+*/
+CREATE PROC addBannedName ( @nickName VPuserID, @isBanned bit = 1, @isFiltered bit = 1 )
+
+AS
+BEGIN
+  DECLARE @lastError int
+  DECLARE @oldName VPuserID
+
+  /* turn all user ID to lower case, to get case insensitive comparisons */
+  SELECT @nickName = lower(@nickName)
+  IF ( ( @nickName = "g" )	OR
+       ( @nickName = "gu" )	OR
+       ( @nickName = "gue" )	OR
+       ( @nickName = "gues" )	OR
+       ( substring( @nickName, 1, 5 ) = "guest" ) )
+    /* to allow server to issue guest "guest" names */
+    RETURN 20002
+  BEGIN TRAN addBannedName
+    /* try to find this name in the list */
+    SELECT @oldName = nickName
+      FROM bannedNames
+      WHERE ( nickName = @nickName )
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN addBannedName
+      RETURN @lastError
+    END
+    
+    IF ( @oldName IS NOT NULL )
+    BEGIN
+      /* name already in list */
+      ROLLBACK TRAN addBannedName
+      RETURN 20001
+    END
+    
+    INSERT INTO bannedNames 
+      ( nickName, isBanned, isFiltered ) 
+      VALUES ( @nickName, @isBanned, @isFiltered )
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN addBannedName
+      RETURN @lastError
+    END
+    
+  COMMIT TRAN addBannedName
+END
+GO

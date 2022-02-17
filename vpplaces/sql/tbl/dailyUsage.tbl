@@ -1,0 +1,24 @@
+/* this table summarizes all the usage details by day */
+CREATE TABLE dailyUsage
+(
+	time		VpTime				NOT NULL,
+
+        /*
+           user types: 0 - for all users,
+                       1 - for chat users,
+                       2 - for buddy list users
+        */
+	userType	tinyint				NOT NULL,
+
+        /*
+           value types: 0 - daily average
+                        1 - minimum value (more than one record may appear for the
+                                           same day, but with different times)
+                        2 - maximum value (more than one record may appear for the
+                                           same day, but with different times)
+        */
+        valueType       tinyint				NOT NULL,
+
+        value           integer DEFAULT 0		NOT NULL
+)
+GO

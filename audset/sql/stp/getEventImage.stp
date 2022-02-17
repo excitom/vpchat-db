@@ -1,0 +1,12 @@
+/* get welcome image for a specific event */
+/* input:  event id
+   output: image
+*/
+CREATE PROC getEventImage ( @eventID numeric(10,0) )
+AS
+BEGIN
+  SELECT welcomeImage
+    FROM events
+    WHERE eventID = @eventID
+END
+GO

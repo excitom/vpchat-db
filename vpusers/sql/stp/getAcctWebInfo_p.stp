@@ -1,0 +1,204 @@
+/*
+ * Get information about home pages associated with an account or a user.
+ *
+ * Input: accountID or userID
+ *        flag: 1 = account, 0 = user
+ *
+ * Output: 0 = success
+ *         20001 = unknown account or user
+ *
+ */
+IF EXISTS(SELECT name FROM sysobjects WHERE name='getAcctWebInfo_p' AND type='P')
+ DROP PROC getAcctWebInfo_p
+GO
+CREATE PROC getAcctWebInfo_p ( @inputID userIdentifier, @acct bit )
+AS
+BEGIN
+  DECLARE @lastError int
+  DECLARE @accountID userIdentifier
+
+  BEGIN TRAN
+    IF @acct = 1
+    BEGIN
+      IF NOT EXISTS (
+        SELECT * FROM userAccounts WHERE accountID = @inputID
+      )
+      BEGIN
+        ROLLBACK TRAN
+        RETURN 20001
+      END
+      SELECT @accountID = @inputID
+    END
+    ELSE BEGIN
+      SELECT @accountID = accountID
+        FROM registration WHERE userID = @inputID
+
+      IF @accountID IS NULL
+      BEGIN
+        ROLLBACK TRAN
+        RETURN 20001
+      END
+    END
+
+    /*
+     * Find information about the entire account
+     */
+    DECLARE @pages int
+    SELECT @pages = COUNT(URL)
+      FROM  vpplaces..homePages, registration 
+      WHERE accountID = @accountID
+      AND   deleted = 0
+      AND   registration.userID = vpplaces..homePages.userID
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN @lastError
+    END
+
+    DECLARE @webPageSpace int
+    SELECT @webPageSpace = intValue
+      FROM configurationKeys
+      WHERE belongsTo=340 AND type=1 AND keyName='webPageSpace'
+
+    DECLARE @webPageXfer  int
+    SELECT @webPageXfer = intValue
+      FROM configurationKeys
+      WHERE belongsTo=340 AND type=1 AND keyName='webPageXfer'
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN @lastError
+    END
+
+    DECLARE @nameLimit int
+    SELECT @nameLimit = nameLimit
+      FROM userAccounts
+      WHERE accountID = @accountID
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN @lastError
+    END
+
+    /*
+     * Sometimes nameLimit is set to zero as an administrative penalty (to
+     * prevent adding more names to the account). In this case, set the
+     * name limit to equal the current names in use, such that all existing
+     * names can have web pages.
+     */
+    IF @nameLimit = 0
+    BEGIN
+      SELECT @nameLimit = COUNT(userID)
+        FROM registration
+        WHERE accountID = @accountID
+    END
+
+    DECLARE @acctMaxSpace int
+    SELECT @acctMaxSpace = @webPageSpace * @nameLimit
+
+    DECLARE @acctMaxTransfer int
+    SELECT @acctMaxTransfer = @webPageXfer * @nameLimit
+
+    /*
+     * Show all pages for an account?
+     */
+    IF @acct = 1
+    BEGIN
+      /*
+       * Does the account have any pages?
+       */
+      IF @pages > 0
+      BEGIN
+        SELECT @pages AS pages,			-- account totals
+               @nameLimit AS nameLimit,
+               @acctMaxSpace AS acctMaxSpace,
+               @acctMaxTransfer AS acctMaxTransfer,
+               @webPageSpace AS webPageSpace,
+               @webPageXfer AS webPageXfer,
+               registration.userID,		-- page-specific info
+               URL,
+               URL2,
+               maxSpace,
+               maxTransfer,
+               megsTransferred,
+               bytesTransferred,
+               webHits,
+               pageViews,
+               bytesUsed,
+               statsDate,
+               locked
+          FROM  vpplaces..homePages, registration 
+          WHERE accountID = @accountID
+          AND   deleted = 0
+          AND   registration.userID = vpplaces..homePages.userID
+
+        SELECT @lastError = @@error
+        IF @lastError != 0
+        BEGIN
+          ROLLBACK TRAN 
+          RETURN @lastError
+        END
+      END
+      /*
+       * Account doesn't have any pages
+       */
+      ELSE BEGIN
+        SELECT @pages AS pages,
+               @nameLimit AS nameLimit,
+               @acctMaxSpace AS acctMaxSpace,
+               @acctMaxTransfer AS acctMaxTransfer,
+               @webPageSpace AS webPageSpace,
+               @webPageXfer AS webPageXfer
+      END
+    END
+    /*
+     * Show individual page only
+     */
+    ELSE BEGIN
+      /*
+       * Does user have a page?
+       */
+      IF EXISTS( SELECT * FROM vpplaces..homePages WHERE userID = @inputID )
+      BEGIN
+        SELECT @pages AS pages,			-- account totals
+               @nameLimit AS nameLimit,
+               @acctMaxSpace AS acctMaxSpace,
+               @acctMaxTransfer AS acctMaxTransfer,
+               @webPageSpace AS webPageSpace,
+               @webPageXfer AS webPageXfer,
+               URL,				-- page-specific info
+	       URL2,
+               maxSpace,
+               maxTransfer,
+               megsTransferred,
+               bytesTransferred,
+               webHits,
+               pageViews,
+               bytesUsed,
+               statsDate,
+               locked
+          FROM  vpplaces..homePages
+          WHERE userID = @inputID
+      END
+      /*
+       * User doesn't have a page
+       */
+      ELSE BEGIN
+        SELECT @pages AS pages,
+               @nameLimit AS nameLimit,
+               @acctMaxSpace AS acctMaxSpace,
+               @acctMaxTransfer AS acctMaxTransfer,
+               @webPageSpace AS webPageSpace,
+               @webPageXfer AS webPageXfer
+      END
+    END
+  COMMIT TRAN
+  RETURN 0
+END
+GO 

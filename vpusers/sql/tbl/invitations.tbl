@@ -1,0 +1,24 @@
+/*
+ * This table tracks email addresses which have been sent an invitation
+ * to join, from a current member. It serves two purposes, preventing
+ * spam and tracking if the invitations work.
+ *
+ * The email is the person who received the invitation.
+ * The accountID, if not NULL, indicates that the person signed up.
+ * The referredByID is the accountID of the inviter.
+ *
+ * The counter indicates how many invitations were sent.
+ * The inviteDate shows the most recent date an invitation was sent.
+ *
+ */
+CREATE TABLE invitations
+(
+	email		longName		NOT NULL
+                        CONSTRAINT invitationsPrimay PRIMARY KEY,
+	accountID	userIdentifier		NULL,
+	referredByID	userIdentifier		NOT NULL,
+	counter		tinyint			NOT NULL,
+	inviteDate	VpTime			NOT NULL
+)
+ON userDetailsSeg
+GO

@@ -1,0 +1,8 @@
+CREATE PROC showAcctHistoryDescr AS
+BEGIN
+  SELECT reason, comment
+  FROM   accountHistory
+  WHERE  accountID = -1
+  ORDER BY reason ASC
+END
+GO

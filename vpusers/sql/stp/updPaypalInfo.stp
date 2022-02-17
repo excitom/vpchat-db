@@ -1,0 +1,50 @@
+/* add or update information about a PayPal payer
+
+
+   output: Return value - 0 - success 
+			  20001 - email is on the bad credit list
+
+	The ccID number is written to output.
+*/
+CREATE PROC updPaypalInfo ( 
+	@email		VARCHAR(75),
+	@subscr_id	VARCHAR(100),
+	@accountID	userIdentifier
+)
+AS
+BEGIN
+  DECLARE @ccID 	userIdentifier
+  DECLARE @lastError	int
+
+  BEGIN TRAN
+    
+    SELECT  @ccID = ccID
+      FROM paypal
+      WHERE email = @email
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    /* this is a new email */
+    IF @ccID IS NOT NULL
+    BEGIN
+      UPDATE subscriptions
+        SET ccID = @ccID
+        WHERE type = 1
+        AND accountID = @accountID
+        AND comment = @subscr_id
+    
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+    END
+  COMMIT TRAN
+END
+GO

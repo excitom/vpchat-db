@@ -1,0 +1,37 @@
+CREATE TABLE echecks
+(
+	ecID		userIdentifier			IDENTITY
+                        	constraint isPrimary primary key,
+	Ecom_billto_online_email	VARCHAR(75)	NOT NULL,
+	Ecom_billto_city		VARCHAR(50)	NOT NULL,
+	Ecom_billto_countrycode		CHAR(2)		NOT NULL,
+	Ecom_billto_name_first		VARCHAR(50)	NOT NULL,
+	Ecom_billto_name_last		VARCHAR(50)	NOT NULL,
+	Ecom_billto_postalcode		VARCHAR(20)	NOT NULL,
+	Ecom_billto_stateprov		VARCHAR(30)	NOT NULL,
+	Ecom_billto_street_line1	VARCHAR(50)	NOT NULL,
+	Ecom_billto_street_line2	VARCHAR(50)	NULL,
+	Ecom_billto_phone_number	VARCHAR(16)	NOT NULL,
+	IOC_buyer_type			CHAR(1)		NOT NULL,
+--		I = Individual
+--		B = Business
+	IOC_id_option			CHAR(1)		NOT NULL,
+--		D = Driver's license info
+--		S = Social security number
+	IOC_DDA_acct_type		CHAR(2)		NOT NULL,
+--		CK = Checking
+--		SV = Savings
+	IOC_business_name		VARCHAR(50)	NULL,
+	IOC_DDA_acct_name		VARCHAR(50)	NOT NULL,
+	IOC_DDA_acct_number		VARCHAR(17)	NOT NULL,
+	IOC_DDA_bankname		VARCHAR(20)	NOT NULL,
+	IOC_DDA_DLnumber		VARCHAR(20)	NULL,
+	IOC_DDA_DLstate			VARCHAR(65)	NULL,
+	IOC_DDA_DOB			VARCHAR(10)	NULL,
+	IOC_DDA_routing			VARCHAR(10)	NOT NULL,
+	IOC_DDA_SSN			VARCHAR(20)	NULL,
+	IOC_DDA_taxID			VARCHAR(20)	NULL,
+		CONSTRAINT uniqueEcheck
+		UNIQUE ( IOC_DDA_acct_number, IOC_DDA_routing )
+)
+GO

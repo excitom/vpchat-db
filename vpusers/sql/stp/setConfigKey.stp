@@ -1,0 +1,20 @@
+/* set the value of one configuration value
+   in the configuration keys table    */
+/* input:  key name, s
+   output: int value, strValue for that key
+ */
+CREATE PROC setConfigKey
+(
+ @keyName varchar(20),
+ @intVal int = NULL,
+ @strVal varchar(255) = NULL
+)
+AS
+  /* set the value of one configurtion key */
+  /* input:  keyName, int value (optional), str value (optional)
+     output: None */
+UPDATE configurationKeys
+  SET intValue = @intVal,
+      strValue = @strVal
+  WHERE keyName = @keyName
+GO

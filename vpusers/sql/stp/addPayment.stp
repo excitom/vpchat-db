@@ -1,0 +1,300 @@
+/* update a user account record to reflect a payment */
+/* input:  account ID, amount, optional comment, optional flag
+
+   flag: 1 = check for duplicate 'comment' - this is used when the 
+		comment field stores a transaction ID string
+
+   paymentStatus:
+	0 = OK
+	1 = unconfirmed
+	2 = failed
+	3 = waiting for check
+   accountStatus:
+	0 = OK
+	1 = new
+	2 = pending
+	3 = closed
+	4 = suspended - penalty
+	5 = suspended - overdue
+
+   output: Return value - 0 - success 
+                          20001 - No such account existed in database
+                          20002 - Duplicate payment
+*/
+CREATE PROC addPayment ( @accountID userIdentifier, @amount smallmoney, @comment varchar(255) = NULL, @checkDup bit = 0 )
+AS
+BEGIN
+  DECLARE @aid userIdentifier
+  DECLARE @paymentID userIdentifier
+  DECLARE @lastError int
+  DECLARE @diffFromGMT int
+  DECLARE @paymentDate VpTime
+  DECLARE @renewalDate VpTime
+  DECLARE @subscription smallmoney
+  DECLARE @accountStatus tinyint
+  DECLARE @paymentStatus tinyint
+  DECLARE @billingCycle tinyint
+  DECLARE @newStatus tinyint
+  DECLARE @updateRequired bit
+
+  SELECT @updateRequired = 0	-- default: no need to update account status
+  
+  SELECT @paymentDate = getdate()
+
+  BEGIN TRAN
+    
+    SELECT @diffFromGMT = gmt
+      FROM getGMT
+    IF @diffFromGMT IS NULL
+      SELECT @diffFromGMT = 0
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN @lastError
+    END
+
+    SELECT @paymentDate = dateadd( hour, (-1) * @diffFromGMT, @paymentDate )
+
+    SELECT @aid = accountID,
+           @accountStatus = accountStatus,
+           @paymentStatus = paymentStatus,
+           @renewalDate = renewalDate,
+           @billingCycle = billingCycle
+      FROM userAccounts
+      WHERE accountID = @accountID
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    IF @accountID != @aid
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20001
+    END
+
+    /* check for duplicate payment? */
+    IF @checkDup = 1
+    BEGIN
+      SELECT @paymentID = paymentID
+        FROM payments
+        WHERE ltrim(comment) = ltrim(@comment)
+
+      IF @accountID != @aid
+      BEGIN
+        ROLLBACK TRAN
+        RETURN 20001
+      END
+
+      IF @paymentID IS NOT NULL
+      BEGIN
+        ROLLBACK TRAN
+        RETURN 20002
+      END
+    END
+
+    INSERT INTO payments (accountID, paymentDate, amount, comment)
+      VALUES (@accountID, @paymentDate, @amount, @comment)
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    /*
+     * Get the new payment ID
+     */
+    SELECT @paymentID = @@identity
+
+    UPDATE accountBalance
+      SET subscription = subscription - @amount
+      WHERE accountID = @accountID
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    SELECT @subscription = subscription
+      FROM accountBalance
+      WHERE accountID = @accountID
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    /*
+     * Update the running balance
+     */
+    DECLARE @bal smallmoney
+    SELECT @bal = 0 - @subscription
+    INSERT runningBalance (paymentID, balance) VALUES (@paymentID, @bal)
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    /* if this payment is enough to clear the balance, set status OK */
+    IF ROUND(@subscription,2) <= 0
+    BEGIN
+      UPDATE userAccounts
+        SET paymentStatus = 0
+        WHERE accountID = @accountID
+
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+
+      /* if account was suspended for non-payment, but payment 
+         was received, set accountStatus to OK
+
+         also update account status is account was new or pending
+      */
+      SELECT @newStatus = @accountStatus	-- default = same
+      SELECT @updateRequired = 1
+
+      IF @accountStatus = 5 OR @accountStatus = 1 OR @accountStatus = 2
+      BEGIN
+        SELECT @newStatus = 0
+
+        /* 
+           Update the renewal date if
+           - Renewal date is past
+           - Account balance 0 or credit
+           - Account was New,Pending, or Overdue
+           OR
+           - Account balance 0 or credit
+           - Account was New
+
+           In the latter case, the new renewal date is adjusted forward the
+                number of days between the registration date and today.
+           
+        */
+        IF @paymentDate >= @renewalDate
+        BEGIN
+          /*
+           * If Pending, then person has been using the account in the interim
+           * so the new renewal date = renewal date + billing cycle.
+           */
+          IF @accountStatus = 2
+          BEGIN
+            SELECT @renewalDate = dateadd( month, @billingCycle, @renewalDate )
+          END
+          /*
+           * If New or Overdue, then person has NOT been using the account
+           * in the interim since the renewal date passed, so set new
+           * renewal date = today + billing cycle.
+           */
+          ELSE BEGIN
+            SELECT @renewalDate = dateadd( month, @billingCycle, @paymentDate )
+          END
+          UPDATE userAccounts
+            SET renewalDate = @renewalDate
+            WHERE accountID = @accountID
+
+          SELECT @lastError = @@error
+          IF @lastError != 0
+          BEGIN
+            ROLLBACK TRAN
+            RETURN @lastError
+          END
+
+          /*
+           * Since this payment has renewed a subscription, update the stats
+           */
+          UPDATE renewals
+            SET months = months + @billingCycle,
+                renewals = renewals + 1
+            WHERE accountID = @accountID
+
+          SELECT @lastError = @@error
+          IF @lastError != 0
+          BEGIN
+            ROLLBACK TRAN
+            RETURN @lastError
+          END
+        END /* end, past renewal date */
+        ELSE
+        BEGIN
+          /*
+           * Not past renewal date, but new account. Adjust the renewal date
+           * ahead based on days past registration date. Why not just add the
+           * billing cycle to today's date? Because of promos that give 
+           * extra time for the first billing period.
+           */
+          IF @accountStatus = 1
+          BEGIN
+            DECLARE @delta int
+            DECLARE @creationDate VpTime
+            SELECT @creationDate = creationDate
+              FROM userAccounts
+              WHERE accountID = @accountID
+
+            SELECT @lastError = @@error
+            IF @lastError != 0
+            BEGIN
+              ROLLBACK TRAN
+              RETURN @lastError
+            END
+
+            SELECT @delta = DATEDIFF (day, @creationDate, @paymentDate)
+            SELECT @renewalDate = dateadd( day, @delta, @renewalDate )
+            UPDATE userAccounts
+              SET renewalDate = @renewalDate
+              WHERE accountID = @accountID
+
+            SELECT @lastError = @@error
+            IF @lastError != 0
+            BEGIN
+              ROLLBACK TRAN
+              RETURN @lastError
+            END
+          END /* end, NEW account */
+
+          /*
+           * If this is a first time payment, initialize
+           * the stats with the term of the subscr.
+           */
+          UPDATE renewals
+            SET months = @billingCycle
+            WHERE accountID = @accountID
+            AND months = 0
+
+          SELECT @lastError = @@error
+          IF @lastError != 0
+          BEGIN
+            ROLLBACK TRAN
+            RETURN @lastError
+          END
+        END /* end, NOT past renewal date */
+      END /* end, new, pending, or overdue */
+    END /* end, balance 0 or credit */
+
+  COMMIT TRAN
+
+  IF @updateRequired = 1
+  BEGIN
+    EXEC updateAccountStatus @accountID, @newStatus
+  END
+
+  RETURN 0
+END
+GO

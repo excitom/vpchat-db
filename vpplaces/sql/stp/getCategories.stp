@@ -1,0 +1,11 @@
+/* find all the catgeories */
+/*
+  INPUT  : NONE
+  OUTPUT : list of all the categories, with all their data
+*/
+CREATE PROC getCategories
+AS
+  SELECT *
+    FROM categories
+    ORDER BY catOrder
+GO 

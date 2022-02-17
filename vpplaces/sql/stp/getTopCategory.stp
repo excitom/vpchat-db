@@ -1,0 +1,28 @@
+/* get the id and name of the 
+   parent category of a specific category */
+/*
+  INPUT  : category id (assumed to belong to 
+                        an existing category)
+  OUTPUT : parent category id, parent category name
+*/
+CREATE PROC getTopCategory
+(
+  @category categoryIdentifier
+)
+AS
+BEGIN
+  DECLARE @cat categoryIdentifier
+  DECLARE @parent categoryIdentifier
+  DECLARE @descr varchar(255)
+  WHILE 1=1
+  BEGIN
+	IF (SELECT parentCategeory  FROM categories WHERE category = @category) IS NULL BREAK
+  	SELECT @cat = c1.category, @descr = c1.description
+    	FROM categories c1, categories c2
+    	WHERE ( c2.category = @category ) AND
+          	( c1.category = c2.parentCategeory )
+	SELECT @category = @cat
+  END
+END
+SELECT @cat AS category, @descr AS description
+GO 

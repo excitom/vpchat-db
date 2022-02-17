@@ -1,0 +1,18 @@
+/* Deletes an invited guest from the invitees table */
+/* input:  eventId, invited guest name, registration mode 
+   output: none
+*/
+CREATE PROC delInvitee
+(
+  @eventID		eventIdentifier,
+  @name             	VPuserID,
+  @regMode		VpRegMode
+)
+AS
+BEGIN
+  /* Delete given invited guest from the table */
+  DELETE eventInvitees 
+  WHERE eventID = @eventID AND inviteeName = @name AND regMode = @regMode
+    
+END
+GO

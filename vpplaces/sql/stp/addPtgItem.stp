@@ -1,0 +1,76 @@
+/* add (or update if an entry with the same serial 
+   number already exists) the record for a
+   Places-To-Go list item. */
+/* input:  serial number in list,
+           URL, title, usage
+   output: NONE
+*/
+CREATE PROC addPtgItem
+(
+  @serialNumber	integer,
+  @url		varchar(255),
+  @title	varchar(255),
+  @Rusage	integer,
+  @Cusage	integer
+)
+AS
+BEGIN  
+  DECLARE @lastError int
+  DECLARE @insideTransaction int
+  DECLARE @matchFound bit
+
+  IF ( @@trancount > 0 )
+    SELECT @insideTransaction = 1
+  ELSE 
+    SELECT @insideTransaction = 0
+
+  IF ( @insideTransaction = 0 )
+    BEGIN TRAN addPtgItem
+
+    /* first check if the auditorium exists */
+    IF EXISTS (
+      SELECT serialNumber
+        FROM PTGlist
+        WHERE serialNumber = @serialNumber )
+      SELECT @matchFound = 1
+    ELSE
+      SELECT @matchFound = 0
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      raiserror @lastError
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+    
+    IF @matchFound = 1
+    BEGIN
+      /* update existing entry */
+      UPDATE PTGlist
+        SET title = @title,
+            URL = @url,
+            roomUsage = @Rusage,
+            corrUsage = @Cusage
+        FROM PTGlist
+        WHERE serialNumber = @serialNumber
+    END
+    ELSE
+    BEGIN
+      /* insert a new entry */
+      INSERT PTGlist
+        VALUES ( @serialNumber, @url, @title, @Rusage, @Cusage )
+    END
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      raiserror @lastError
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+    
+  IF ( @insideTransaction = 0 )
+    COMMIT TRAN addPtgItem
+END
+GO

@@ -1,0 +1,59 @@
+/* get the usage statistics for a given period of time, by hour
+
+  INPUT  : startTime, endTime
+  OUTPUT : time,
+           summary values - ( all users, chat users, Buddy list users ) X 
+                            (average, minimum, maximum)
+
+           e.g. if summary is desired for period starting on 
+           January 15th 1997, 12:20, and ending on January 16th 1997, 21:17, values will look like this:
+
+           1997 1 15 12:00 <all-avg> <all-min> <all-max>...<bl-avg> <bl-min> <bl-max>
+           1997 1 15 13:00 <all-avg> <all-min> <all-max>...<bl-avg> <bl-min> <bl-max>
+           1997 1 15 14:00 <all-avg> <all-min> <all-max>...<bl-avg> <bl-min> <bl-max>
+            .   . . .       .        .
+            .   . . .       .        .
+            .   . . .       .        .
+            .   . . .       .        .
+            .   . . .       .        .
+           1997 1 16 21:00 <all-avg> <all-min> <all-max>...<bl-avg> <bl-min> <bl-max>
+
+           where each <braced value> is a 4-byte-representable integer.
+           note that the start of the hour for the respective hours are used,
+           so that the data is correct for all of the regarded hours.
+*/
+CREATE PROC getHourlyStatistics
+(
+  @startTime VpTime,
+  @endTime VpTime
+)
+AS
+BEGIN
+  /* first fix times to include each possible entry from the given hours */
+  /* make @startTime be the start of the hour which @startTime belongs to */
+  SELECT @startTime = dateadd( minute, (-1) * datepart(minute,@startTime), @startTime )
+  
+  /* make @endTime be 23:59 of the last day on the hour which @endTime belongs to */
+  SELECT @endTime = dateadd( minute, 59 - datepart(minute,@endTime), @endTime )
+
+  SELECT DISTINCT
+         year=datepart( year, time),
+         month=datepart( month, time),
+         day=datepart( day, time),
+         hour=datepart( hour, time),
+         allAvg=avg(totalUsage),
+         allMin=min(totalUsage),
+         allMax=max(totalUsage),
+         chatAvg=avg(roomUsage+corrUsage),
+         chatMin=min(roomUsage+corrUsage),
+         chatMax=max(roomUsage+corrUsage),
+         BlAvg=avg(BLUsage),
+         BlMin=min(BLUsage),
+         BlMax=max(BLUsage)
+  FROM totalUsage
+  WHERE ( time BETWEEN @startTime AND @endTime )
+  GROUP BY datepart( year, time), datepart( month, time), datepart( day, time), datepart( hour, time)
+  ORDER BY year, month, day, hour
+  
+END
+GO 

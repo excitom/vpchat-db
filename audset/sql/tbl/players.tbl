@@ -1,0 +1,15 @@
+/*
+ * Player cumulative results
+ *
+ */
+CREATE TABLE players
+(
+	userID		userIdentifier		NOT NULL,
+	gameTypeID	userIdentifier		NOT NULL,
+		CONSTRAINT uniquePlayers UNIQUE (userID, gameTypeID),
+	won		int			NOT NULL,
+	lost		int			NOT NULL,
+	tied		int			NOT NULL,
+	rating		int			NOT NULL
+)
+GO

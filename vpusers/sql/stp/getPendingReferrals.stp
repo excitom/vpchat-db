@@ -1,0 +1,39 @@
+/*
+ * get pending referrals
+ *
+ * INPUT: flag: 1 => show only if over 30 days, 0 => show only if < 30 days
+ * OUTPUT: referring account owner chat name, referral date, account status, 
+ *            referral type
+ */
+
+CREATE PROC getPendingReferrals ( @ripe bit )
+AS
+BEGIN
+  DECLARE @lastMonth VpTime
+
+  SELECT @lastMonth = dateadd( month, -1, getdate() )
+
+  IF @ripe = 1
+  BEGIN
+    SELECT referrals.accountID, referrals.referredByID, creationDate, accountStatus
+      FROM vpusers..referrals, vpusers..userAccounts
+      WHERE type = 1
+      AND vpusers..referrals.referredByID != 0
+      AND vpusers..referrals.accountID=vpusers..userAccounts.accountID
+      AND accountStatus != 1
+      AND creationDate <= @lastMonth
+      ORDER BY creationDate ASC
+  END
+  ELSE BEGIN
+    SELECT referrals.accountID, referrals.referredByID, creationDate, accountStatus
+      FROM vpusers..referrals, vpusers..userAccounts
+      WHERE type = 1
+      AND vpusers..referrals.referredByID != 0
+      AND vpusers..referrals.accountID=vpusers..userAccounts.accountID
+      AND accountStatus != 1
+      AND creationDate > @lastMonth
+      ORDER BY creationDate ASC
+  END
+
+END
+GO

@@ -1,0 +1,160 @@
+/*
+ * Get the results of a tournament.
+ *
+ * Input: EventID
+ *
+ * Output: 0 = success
+ *         20000 = no such event
+ *         20001 = still in progress
+ *         20002 = cancelled
+ *
+ * Row(s) returned in descending order:
+ *  points, player name
+ *
+ * If single or double elimination, only one row is returned (the winner)
+ * and the points = 0.
+ *
+ * If round robin or swiss, a row is returned for each player.
+ *
+ * Tom Lang 12/2004
+ */
+IF EXISTS
+ (SELECT name FROM sysobjects WHERE name = 'getResults' AND type = 'P') 
+ DROP PROC getResults
+GO  
+CREATE PROC getResults
+(
+  @tournID	userIdentifier
+)
+AS
+BEGIN
+  DECLARE @status tinyint
+  DECLARE @type tinyint
+  DECLARE @splitPrize bit
+
+  SELECT @status = NULL
+  SELECT @status = status, @type = type, @splitPrize = splitPrize
+    FROM tournaments
+    WHERE tournID = @tournID
+
+  IF @@rowcount = 0
+    RETURN 20000
+
+  IF @status = 0x08
+    RETURN 20002
+
+  IF (@status != 0x04 AND @status != 0x40)
+    RETURN 20001
+
+  /*
+   * Swiss or Round Robin
+   */
+  IF @type = 0x04 OR @type = 0x08
+  BEGIN
+    IF @status = 0x40
+    BEGIN
+      IF EXISTS (SELECT * FROM teamMates WHERE tournID = @tournID)
+      BEGIN
+        SELECT (won*2)+tied AS 'points', 0 AS 'prizeShare', 0 AS 'prizeWon',
+                u1.nickName, p.userID, u2.nickName AS teamMate, t.userID
+          FROM tournamentPlayers p, teamMates t,
+                vpusers..users u1, vpusers..users u2
+          WHERE p.tournID = @tournID
+          AND   p.tournID = t.tournID
+          AND    p.userID = t.priUserID
+          AND    p.userID = u1.userID
+          AND    t.userID = u2.userID
+          AND          td = 0
+          ORDER BY (won*2)+tied DESC
+      END
+      ELSE BEGIN
+        SELECT (won*2)+tied AS 'points', 0 AS 'prizeShare', 0 AS 'prizeWon',
+                nickName, p.userID
+          FROM tournamentPlayers p, vpusers..users u
+          WHERE tournID = @tournID
+          AND p.userID = u.userID
+          AND td = 0
+          ORDER BY (won*2)+tied DESC
+      END
+    END
+    ELSE BEGIN
+      IF EXISTS (SELECT * FROM teamMates WHERE tournID = @tournID)
+      BEGIN
+        SELECT (won*2)+tied AS 'points', prizeShare, prizeWon,
+                u1.nickName, p.userID, u2.nickName AS teamMate, t.userID
+          FROM tournamentPlayers p, teamMates t,
+                vpusers..users u1, vpusers..users u2
+          WHERE p.tournID = @tournID
+          AND   p.tournID = t.tournID
+          AND    p.userID = t.priUserID
+          AND    p.userID = u1.userID
+          AND    t.userID = u2.userID
+          AND td = 0
+          ORDER BY prizeWon DESC, (won*2)+tied DESC
+      END
+      ELSE BEGIN
+        SELECT (won*2)+tied AS 'points', prizeShare, prizeWon, nickName, p.userID
+          FROM tournamentPlayers p, vpusers..users u
+          WHERE tournID = @tournID
+          AND p.userID = u.userID
+          AND td = 0
+          ORDER BY prizeWon DESC, (won*2)+tied DESC
+      END
+    END
+  END
+  /*
+   * Single or Double Elimination
+   */
+  ELSE BEGIN
+    IF @splitPrize = 1 AND @status = 0x40
+    BEGIN
+      IF EXISTS (SELECT * FROM teamMates WHERE tournID = @tournID)
+      BEGIN
+        SELECT 0 AS 'points', 0 AS 'prizeShare', 0 AS 'prizeWon', u1.nickName, 
+            u1.userID, u2.nickName AS 'teamMate', u2.userID AS 'userID2'
+          FROM brackets b, teamMates t,
+                vpusers..users u1, vpusers..users u2
+          WHERE b.tournID = @tournID
+          AND   b.tournID = t.tournID
+          AND   b.player  = t.priUserID
+          AND   player    = u1.userID
+          AND   t.userID  = u2.userID
+          ORDER BY seed ASC, round DESC, bracketType DESC
+      END
+      ELSE BEGIN
+        SELECT 0 AS 'points', 0 AS 'prizeShare', 0 AS 'prizeWon', nickName, userID
+          FROM brackets b, vpusers..users u
+          WHERE tournID = @tournID
+          AND   player  = userID
+          ORDER BY seed ASC, round DESC, bracketType DESC
+      END
+    END
+    ELSE BEGIN
+      IF EXISTS (SELECT * FROM teamMates WHERE tournID = @tournID)
+      BEGIN
+        SELECT 0 AS 'points', prizeShare, prizeWon, u1.nickName, p.userID,
+                u2.nickName AS teamMate, t.userID AS 'userID2'
+          FROM tournamentPlayers p, teamMates t,
+                vpusers..users u1, vpusers..users u2
+          WHERE p.tournID = @tournID
+          AND   p.tournID = t.tournID
+          AND    p.userID = t.priUserID
+          AND    p.userID = u1.userID
+          AND    t.userID = u2.userID
+          AND          td = 0
+          AND prizeShare > 0
+          ORDER BY prizeWon DESC
+      END
+      ELSE BEGIN
+        SELECT 0 AS 'points', prizeShare, prizeWon, nickName, p.userID
+          FROM tournamentPlayers p, vpusers..users u
+          WHERE tournID = @tournID
+          AND p.userID = u.userID
+          AND td = 0
+          AND prizeShare > 0
+          ORDER BY prizeWon DESC
+      END
+    END
+  END
+END
+GO

@@ -1,0 +1,21 @@
+/*
+ * When a dynamic page is rendered, this table is consulted to
+ * find the appropriate "related links" HTML fragment to add to
+ * the page.
+ *
+ * If there isn't a specific set of links for a page, check the
+ * parent category. This can work recursively, until the top level
+ * is reached - which has the site-wide default set of links.
+ *
+ */
+CREATE TABLE linkCategories
+(
+	category	categoryIdentifier	IDENTITY
+                        CONSTRAINT isPrimary primary key,
+	description    	varchar(128)		NOT NULL,
+	parentCategory	categoryIdentifier	NULL
+                        CONSTRAINT parentCategoryRefLinks REFERENCES linkCategories,
+		CONSTRAINT uniqueLinkName 
+			UNIQUE( parentCategory, description )
+)
+GO

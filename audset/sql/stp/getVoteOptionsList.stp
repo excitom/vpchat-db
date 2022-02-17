@@ -1,0 +1,13 @@
+/* get list of vote options for a given vote  */
+/* input:  vote ID
+   output: list of vote options, stating for each - 
+           id, option, description
+*/
+CREATE PROC getVoteOptionsList(
+        @voteID 	numeric(10,0)
+)
+AS
+  SELECT optionID, label, description
+    FROM voteOptions
+    WHERE voteID = @voteID
+GO

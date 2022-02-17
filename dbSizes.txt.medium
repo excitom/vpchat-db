@@ -1,0 +1,81 @@
+#logins definitions
+numberOfLogins= 3
+login1.name= vpusr
+login1.password= vpusr1
+login2.name= vpplaces
+login2.password= vpplaces
+login3.name= audset
+login3.password= audset1
+
+# Device sizes - in megabytes
+blocksInMegabyte= 500
+
+numberOfDevices= 3
+numberOfDatabases= 3
+
+# names of databases
+database1.name= vpusers
+database2.name= vpplaces
+database3.name= audset
+
+device1.name= VpDatabases
+device1.path=
+device1.location= VpDatabases.dat
+device1.numberOfSegments= 3
+device1.segment1= vpusers
+device1.segment2= vpplaces
+device1.segment3= audset
+
+device2.name= VpDatabases_log
+device2.path=
+device2.location= VpDatabases.log
+device2.numberOfSegments= 3
+device2.segment1= vpusers
+device2.segment2= vpplaces
+device2.segment3= audset
+
+device3.name= VpUserDetails
+device3.path=
+device3.location= VpUserDetails.dat
+device3.numberOfSegments= 1
+device3.segment1= vpusers
+
+# allocations - in megabytes
+# structure is <database name>.allocation.<device name>
+vpusers.allocation.data.VpDatabases= 200
+vpusers.allocation.log.VpDatabases_log= 20
+vpusers.allocation.data.VpUserDetails= 50
+vpplaces.allocation.data.VpDatabases= 50
+vpplaces.allocation.log.VpDatabases_log= 10
+audset.allocation.data.VpDatabases= 20
+audset.allocation.log.VpDatabases_log= 10
+
+# user defined segments
+vpusers.userDefinedSegments= 1
+vpplaces.userDefinedSegments= 0
+audset.userDefinedSegments= 0
+vpusers.segment1.name= userDetailsSeg
+vpusers.segment1.location= VpUserDetails
+
+# segments partitioning
+vpusers.deviceUse.VpDatabases_log= logsegment
+vpusers.deviceUse.VpDatabases= system
+vpusers.deviceUse.VpDatabases= default
+vpusers.deviceUse.VpUserDetails= userDetailsSeg
+vpplaces.deviceUse.VpDatabases_log= logsegment
+vpplaces.deviceUse.VpDatabases= system
+vpplaces.deviceUse.VpDatabases= default
+audset.deviceUse.VpDatabases_log= logsegment
+audset.deviceUse.VpDatabases= system
+audset.deviceUse.VpDatabases= default
+
+# database owner account
+vpusers.DbOwner.name= vpusr
+vpplaces.DbOwner.name= vpplaces
+audset.DbOwner.name= vpplaces
+
+# log threshold positions
+vpusers.logThreshold= 5
+vpplaces.logThreshold= 2
+audset.logThreshold= 2
+

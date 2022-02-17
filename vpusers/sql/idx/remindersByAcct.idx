@@ -1,0 +1,4 @@
+/* pre-account reminder notes */
+CREATE INDEX remindersByAcct
+ON reminders ( accountID )
+GO

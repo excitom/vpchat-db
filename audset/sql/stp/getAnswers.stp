@@ -1,0 +1,92 @@
+/* getAnswers - returns a list of all guest answers for the 
+                     requested event. 
+   Inputs - eventId: id of the event for which to get interactions/answers pairs
+            orderBy: "InteractionType", "Category", "GuestName", "None"
+   Output - a list of interactions/answers pairs with the following fields: 
+            interaction Id, interaction type name, category, 
+            sender,interaction text, guest, answer text
+   Processing - scans the guest answers table, and returns the requested
+                interactions/answers pairs.  
+*/
+CREATE PROC getAnswers (
+              @eventID	 eventIdentifier,
+              @orderBy varchar(20)
+       )
+AS
+BEGIN
+
+DECLARE @lastError integer
+DECLARE @ready    integer
+ 
+/* Get all answers which status is "READY" */
+/*-----------------------------------------*/  
+SELECT @ready = statusID 
+FROM interactionStatus
+WHERE name = "READY"
+SELECT @lastError = @@error
+IF @lastError != 0
+BEGIN
+  RAISERROR @lastError
+  RETURN @lastError
+END
+
+IF @orderBy = "InteractionType"
+BEGIN
+  SELECT answers.interactionID, name, category, eventInteractions.senderName, eventInteractions.text, answers.senderName, answers.text
+  FROM answers, eventInteractions ( INDEX isPrimary ), interactionsAllowed
+  WHERE   answers.status = @ready AND 
+        answers.interactionID = eventInteractions.interactionID AND
+        eventInteractions.eventID = @eventID AND
+        interactionsAllowed.eventID = @eventID AND
+        interactionsAllowed.interactionType = eventInteractions.interactionType 
+  ORDER BY name
+  SELECT @lastError = @@error
+  IF @lastError != 0
+    RETURN @lastError
+END
+ELSE 
+  IF @orderBy = "Category"
+  BEGIN
+    SELECT answers.interactionID, name, category, eventInteractions.senderName, eventInteractions.text, answers.senderName, answers.text
+    FROM answers, eventInteractions ( INDEX isPrimary ), interactionsAllowed
+    WHERE   answers.status = @ready AND 
+        answers.interactionID = eventInteractions.interactionID AND
+        eventInteractions.eventID = @eventID AND
+        interactionsAllowed.eventID = @eventID AND
+        interactionsAllowed.interactionType = eventInteractions.interactionType 
+    ORDER BY category
+    SELECT @lastError = @@error
+    IF @lastError != 0
+      RETURN @lastError
+  END
+  ELSE  
+    IF @orderBy = "GuestName"
+    BEGIN
+      SELECT answers.interactionID, name, category, eventInteractions.senderName, eventInteractions.text, answers.senderName, answers.text
+      FROM answers, eventInteractions ( INDEX isPrimary ), interactionsAllowed
+      WHERE   answers.status = @ready AND 
+        answers.interactionID = eventInteractions.interactionID AND
+        eventInteractions.eventID = @eventID AND
+        interactionsAllowed.eventID = @eventID AND
+        interactionsAllowed.interactionType = eventInteractions.interactionType 
+      ORDER BY answers.senderName
+      SELECT @lastError = @@error
+      IF @lastError != 0
+        RETURN @lastError
+    END
+  ELSE /* No sorting */
+    BEGIN
+      SELECT answers.interactionID, name, category, eventInteractions.senderName, eventInteractions.text, answers.senderName, answers.text
+      FROM answers, eventInteractions( INDEX isPrimary ), interactionsAllowed
+      WHERE   answers.status = @ready AND 
+        answers.interactionID = eventInteractions.interactionID AND
+        eventInteractions.eventID = @eventID AND
+        interactionsAllowed.eventID = @eventID AND
+        interactionsAllowed.interactionType = eventInteractions.interactionType 
+      SELECT @lastError = @@error
+      IF @lastError != 0
+        RETURN @lastError
+    END
+
+END
+GO

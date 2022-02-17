@@ -1,0 +1,15 @@
+/*
+ * Game results - secondary
+ *
+ * This table complements gameResultsPri and contains information about
+ * players 2 through N in a game. Information about player 1 as well as
+ * common information about the game is in the gameResultsPri table.
+ */
+CREATE TABLE gameResultsSec
+(
+	resultID	userIdentifier		NOT NULL,
+	userID		userIdentifier		NOT NULL,
+	slot		tinyint			NOT NULL,
+	score		int			NOT NULL
+)
+GO

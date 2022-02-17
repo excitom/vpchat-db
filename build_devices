@@ -1,0 +1,19 @@
+#!/bin/sh
+
+# This script does the building of the database devices:
+
+# read parameters
+ServicesRoot=$1
+SybaseRoot=$2
+
+DBAdminLogin=$3
+DBAdminPasswd=$4
+DataServer=$5
+
+SYBASE=$SybaseRoot
+export SYBASE
+sybBinDir=$SybaseRoot/bin
+
+
+echo $sybBinDir/isql -U$DBAdminLogin -P$DBAdminPasswd -S$DataServer -i $ServicesRoot/create_db.sql
+$sybBinDir/isql -U$DBAdminLogin -P$DBAdminPasswd -S$DataServer -i $ServicesRoot/create_db.sql

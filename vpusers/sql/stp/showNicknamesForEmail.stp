@@ -1,0 +1,15 @@
+/* find password for a given email
+   INPUT  : email
+   OUTPUT : list of nicknames and passwords
+            for entries with this email
+*/
+CREATE PROC showNicknamesForEmail ( @email longName )
+AS
+BEGIN
+  SELECT @email = lower(@email)
+  SELECT nickName, password
+    FROM registration, users
+    WHERE ( email = @email ) AND
+          ( registration.userID = users.userID )
+END
+GO 

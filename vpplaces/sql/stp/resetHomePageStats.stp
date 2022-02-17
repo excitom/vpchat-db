@@ -1,0 +1,117 @@
+/*
+ * At the end of the month, reset stats counters
+ * for a home page. The end of the month depends on 
+ * date the home page was created.
+ *
+ * An entry is added to the history table with the
+ * value of the counters prior to reset.
+ *
+ * output: return value - 0 if successful
+ */
+CREATE PROC resetHomePageStats 
+AS
+BEGIN
+  DECLARE @lastError int
+  DECLARE @diffFromGMT int
+  DECLARE @now VpTime
+  DECLARE @statsDate VpTime
+  DECLARE @megsTransferred int
+  DECLARE @bytesTransferred int
+  DECLARE @webHits int
+  DECLARE @pageViews int
+  DECLARE @bytesUsed int
+  DECLARE @maxSpace int
+  DECLARE @locked bit
+  DECLARE @deleted bit
+  DECLARE @nameLocked bit
+  DECLARE @userID userIdentifier
+  DECLARE @URL UrlType
+
+  SELECT @diffFromGMT = gmt
+  FROM vpusers..getGMT
+ 
+  SELECT @lastError = @@error
+  IF @lastError != 0
+  BEGIN
+    RETURN @lastError
+  END
+
+  SELECT @now = dateadd( hour, (-1) * @diffFromGMT, getdate() )
+
+  DECLARE hpCursor CURSOR
+    FOR SELECT vpusers..registration.userID,
+               vpusers..users.nickName,
+               megsTransferred, bytesTransferred, bytesUsed, maxSpace,
+               webHits, pageViews, homePages.locked, deleted, statsDate,
+	       vpusers..users.locked
+     FROM vpusers..registration, vpusers..users, homePages
+     WHERE statsDate <= @now
+     AND vpusers..users.userID = vpusers..registration.userID
+     AND vpusers..users.nickName = URL
+
+  OPEN hpCursor
+  FETCH hpCursor INTO @userID, @URL, @megsTransferred, @bytesTransferred, @bytesUsed, @maxSpace, @webHits, @pageViews, @locked, @deleted, @statsDate, @nameLocked
+  WHILE ( @@sqlstatus = 0 )
+  BEGIN
+
+    DECLARE @active bit
+    SELECT  @active  = 0
+    IF ((@megsTransferred > 0) OR (@bytesTransferred > 0))
+    BEGIN
+      SELECT @active = 1
+    END
+    ELSE BEGIN
+      IF @deleted = 0
+      BEGIN
+        SELECT @active = 1
+      END
+    END
+
+    IF @active = 1
+    BEGIN
+      BEGIN TRAN
+        SELECT @URL		-- write URL to output
+        INSERT homePageHistory
+          (userID, statsDate, megsTransferred, bytesTransferred, webHits, pageViews, bytesUsed)
+          VALUES (@userID, @now, @megsTransferred, @bytesTransferred, @webHits, @pageViews, @bytesUsed)
+
+        SELECT @lastError = @@error
+        IF @lastError != 0
+        BEGIN
+          ROLLBACK TRAN
+        END
+        ELSE BEGIN
+          SELECT @statsDate  = dateadd( month, 1, @statsDate )
+          IF @statsDate < @now
+          BEGIN
+            SELECT @statsDate = dateadd( month, 1, @now )
+          END
+          UPDATE homePages
+            SET statsDate = @statsDate, 
+                megsTransferred = 0, bytesTransferred = 0,
+                webHits = 0, pageViews = 0
+            WHERE URL = @URL
+
+          IF @lastError != 0
+          BEGIN
+            ROLLBACK TRAN
+          END
+        END
+      COMMIT TRAN
+
+      /*
+       * If page is locked due to transfer limit exceeded, unlock it,
+       * unless the name is locked or it's over the space limit too.
+       */
+      SELECT @maxSpace = @maxSpace * 1024 *1024
+      IF @locked = 1 AND @nameLocked = 0 AND @maxSpace > @bytesUsed
+      BEGIN
+        EXEC updateHomePage @userID, 'L', 0, @URL
+      END
+    END
+    FETCH hpCursor INTO @userID, @URL, @megsTransferred, @bytesTransferred, @bytesUsed, @maxSpace, @webHits, @pageViews, @locked, @deleted, @statsDate, @nameLocked
+  END
+
+RETURN 0
+END
+GO

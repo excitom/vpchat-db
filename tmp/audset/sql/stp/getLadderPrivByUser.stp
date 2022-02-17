@@ -1,0 +1,37 @@
+/*
+ * Get an access list entry for a game ladder for a specific user
+ *
+ */
+IF EXISTS
+ (SELECT name FROM sysobjects WHERE name = 'getLadderPrivByUser' AND type = 'P') 
+ DROP PROC getLadderPrivByUser
+GO  
+CREATE PROC getLadderPrivByUser (
+	@userID		userIdentifier,
+	@notifyID	userIdentifier=NULL
+)
+AS
+BEGIN
+  IF @notifyID IS NULL
+  BEGIN
+    SELECT userID, notifyAccessList.notifyID, notifyAccessList.locked, maxMsgs, msgInterval, msgCount, description, type, accessPriv, ladderName, ladders.gameTypeID, gameName, createdDate
+      FROM notifyAccessList, notifyLists, ladders, gameTypes
+      WHERE userID = @userID
+      AND notifyAccessList.notifyID = notifyLists.notifyID
+      AND notifyAccessList.notifyID = ladders.notifyID
+      AND ladders.gameTypeID = gameTypes.gameTypeID
+      AND notifyLists.deleted = 0
+  END
+  ELSE
+  BEGIN
+    SELECT userID, notifyAccessList.notifyID, notifyAccessList.locked, maxMsgs, msgInterval, msgCount, description, type, accessPriv, ladderName, ladders.gameTypeID, gameName, createdDate
+      FROM notifyAccessList, notifyLists, ladders, gameTypes
+      WHERE userID = @userID
+      AND notifyAccessList.notifyID = @notifyID
+      AND notifyAccessList.notifyID = notifyLists.notifyID
+      AND notifyAccessList.notifyID = ladders.notifyID
+      AND ladders.gameTypeID = gameTypes.gameTypeID
+      AND notifyLists.deleted = 0
+  END
+END
+GO

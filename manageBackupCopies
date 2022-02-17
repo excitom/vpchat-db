@@ -1,0 +1,56 @@
+#!/bin/sh
+
+# This script does management of backup copies - 
+# if there are too many copies, is deletes the oldest
+
+  
+# get input parameters
+ServicesRoot=$1
+  
+# get parameters from backupData.txt
+DBBackupDir=`grep DBBackupDir $ServicesRoot/backupData.txt | cut -d" " -f2`
+backupCopiesToHold=`grep backupCopiesToHold $ServicesRoot/backupData.txt | cut -d" " -f2`
+
+# find matching files and rename them
+if [ ! -d $DBBackupDir/old ]
+then
+  mkdir $DBBackupDir/old
+fi
+
+# move to directory "old" under backup directory
+mv $DBBackupDir/*.backupSet* $DBBackupDir/old
+
+echo
+echo Keeping last $backupCopiesToHold backup sets
+
+setNumber=`expr $backupCopiesToHold - 1`
+while [ $setNumber -ge 0 ] 
+do
+  # first find if there are any files belonging 
+  # to a backup set of this number
+  if [ `ls -a1 $DBBackupDir/old | grep backupSet$setNumber | wc -l` -gt 0 ]
+  then
+    for backupFile in $DBBackupDir/old/*.backupSet$setNumber*
+    {
+      # find a new name with a new set number, 
+      # so that "old/*backupSet<X>*" now becomes
+      # "*backupSet<X+1>*"
+      newSetNumber=`expr $setNumber + 1`
+      newFile=`echo $backupFile | sed 's#'$DBBackupDir'/old/#'$DBBackupDir'/#'`
+      oldFile=$newFile
+      newFile=`echo $newFile | sed 's#backupSet'$setNumber'#backupSet'$newSetNumber'#'`
+      
+      # move to the new name
+      echo renaming $oldFile $newFile
+      mv $backupFile $newFile
+    }
+  fi
+  setNumber=`expr $setNumber - 1`
+done
+
+# delete all those files that hasn't been 
+# renamed back - they are not needed anymore
+if [ `ls -a1 $DBBackupDir/old | grep backupSet | wc -l` -gt 0 ]
+then
+  /bin/rm $DBBackupDir/old/*
+fi

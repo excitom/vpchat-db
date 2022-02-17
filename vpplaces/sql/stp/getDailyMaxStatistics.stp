@@ -1,0 +1,75 @@
+/* get the usage statistics for a given period of time, by day
+   NOTE: dailyUsage is used, so statistics are good only
+         up to the previous day
+
+  INPUT  : startTime, endTime
+  OUTPUT : time, 
+           summary values - ( all users, chat users, Buddy list users ) X 
+                            (maximum)
+
+           e.g. if summary is desired for period starting on 
+           January 1st 1997, and ending on January 15th 1997, values will look like this:
+
+           1997 1 1 00:00 <all-max> <chat-max> <bl-max>
+           1997 1 2 00:00 <all-max> <chat-max> <bl-max>
+           1997 1 3 00:00 <all-max> <chat-max> <bl-max>
+            .   . . .       .        .
+            .   . . .       .        .
+            .   . . .       .        .
+            .   . . .       .        .
+            .   . . .       .        .
+           1997 1 15 00:00 <all-max> <chat-max> <bl-max>
+
+           where each <braced value> is a 4-byte-representable integer.
+*/
+CREATE PROC getDailyMaxStatistics
+(
+  @startTime VpTime,
+  @endTime VpTime
+)
+AS
+BEGIN
+  /* first fix times to include each possible entry from the given days */
+  /* make @startTime be 00:00 of the day on which @startTime belongs to */
+  SELECT @startTime = dateadd( hour, (-1) * datepart(hour,@startTime), @startTime )
+  SELECT @startTime = dateadd( minute, (-1) * datepart(minute,@startTime), @startTime )
+  
+  /* make @endTime be 23:59 of the day to which @endTime belongs to */
+  SELECT @endTime = dateadd( hour, 23 - datepart(hour,@endTime), @endTime )
+  SELECT @endTime = dateadd( minute, 59 - datepart(minute,@endTime), @endTime )
+
+
+  SELECT DISTINCT
+         year=datepart( year, d1.time), 
+         month=datepart( month, d1.time), 
+         day=datepart( day, d1.time),
+         hour=0, /* daily summary, so hour is meaningless */
+         allMax=max(d1.value),
+         chatMax=max(d2.value),
+         BlMax=max(d3.value)
+  FROM
+         dailyUsage d1,
+         dailyUsage d2,
+         dailyUsage d3
+  WHERE	    
+         ( d1.time BETWEEN @startTime AND @endTime ) AND
+         ( d2.time BETWEEN @startTime AND @endTime ) AND
+         ( d3.time BETWEEN @startTime AND @endTime ) AND
+         ( datepart(year,d2.time) = datepart(year,d1.time) ) AND
+         ( datepart(month,d2.time) = datepart(month,d1.time) ) AND
+         ( datepart(day,d2.time) = datepart(day,d1.time) ) AND
+         ( datepart(year,d3.time) = datepart(year,d1.time) ) AND
+         ( datepart(month,d3.time) = datepart(month,d1.time) ) AND
+         ( datepart(day,d3.time) = datepart(day,d1.time) ) AND
+         (d1.userType=0) AND (d1.valueType=2) AND
+         (d2.userType=1) AND (d2.valueType=2) AND
+         (d3.userType=2) AND (d3.valueType=2)
+
+  GROUP BY datepart( year, d1.time), 
+           datepart( month, d1.time), 
+           datepart( day, d1.time)
+  ORDER BY year, month, day
+
+
+END
+GO 

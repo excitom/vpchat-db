@@ -1,0 +1,52 @@
+/*
+ * Get status of a bracket for the current round
+ *
+ * Input: tournID
+ *
+ * Output: 0 = success
+ *         20000 = no such tournament
+ */
+IF EXISTS
+ (SELECT name FROM sysobjects WHERE name = 'getBracketStatus' AND type = 'P') 
+ DROP PROC getBracketStatus
+GO  
+CREATE PROC getBracketStatus (
+	@tournID userIdentifier
+)
+AS
+BEGIN
+  DECLARE @status tinyint
+  DECLARE @round  smallint
+  DECLARE @games  smallint
+  DECLARE @completed  smallint
+  DECLARE @more   bit
+
+  SELECT @status = status, @round = currentRound
+    FROM tournaments WHERE tournID = @tournID
+
+  IF @status IS NULL
+  BEGIN
+    RETURN 20000
+  END
+
+  SELECT @games = COUNT(*) FROM brackets
+    WHERE tournID = @tournID
+    AND round = @round
+
+  SELECT @games = @games / 2
+
+  SELECT @completed = COUNT(*) FROM brackets
+    WHERE tournID = @tournID
+    AND round = @round
+    AND winner = 1
+ 
+  IF EXISTS (SELECT * FROM brackets
+              WHERE tournID = @tournID
+              AND round > @round)
+    SELECT @more = 1
+  ELSE
+    SELECT @more = 0
+
+  SELECT @status AS status, @round AS round, @games AS games, @completed AS completed, @more AS more
+END
+GO

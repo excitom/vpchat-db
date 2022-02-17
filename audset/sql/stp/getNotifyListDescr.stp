@@ -1,0 +1,17 @@
+/*
+ * Get the descriptive name of a notify list
+ *
+ * Input: list ID
+ *
+ */
+CREATE PROC getNotifyListDescr (
+	@notifyID	userIdentifier
+)
+AS
+BEGIN
+  SELECT description, subheader, type
+    FROM notifyLists
+    WHERE notifyID = @notifyID
+    ORDER BY description ASC
+END
+GO

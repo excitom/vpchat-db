@@ -1,0 +1,141 @@
+/* add a new subscription record
+   input:
+      type 0 = complimentary
+           1 = paypal
+           2 = credit card
+           3 = electronic check
+   output: return value -
+           negative value - DB failure, 
+           0 - success, new subscription
+           1 - success, updated subscription
+           20001 - unknown accountID
+           20002 - account closed or suspended
+*/
+CREATE PROC registerNewSubscription
+( 
+  @accountID userIdentifier,
+  @type         smallint,
+  @comment      longName,
+  @creationDate VpTime = NULL,
+  @autoRenew    bit = 1,
+  @ccID         userIdentifier = NULL
+)
+AS
+BEGIN
+  DECLARE @lastError int
+  DECLARE @diffFromGMT int
+  DECLARE @aid userIdentifier
+  DECLARE @accountStatus tinyint
+
+  BEGIN TRAN
+    SELECT @diffFromGMT = gmt
+      FROM getGMT
+    IF @diffFromGMT IS NULL
+      SELECT @diffFromGMT = 0
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN @lastError
+    END
+
+    IF @creationDate IS NULL
+    BEGIN
+      SELECT @creationDate = getdate()
+    END
+
+    SELECT @creationDate = dateadd( hour, (-1) * @diffFromGMT, @creationDate )
+
+    SELECT @accountStatus = accountStatus
+      FROM userAccounts
+      WHERE accountID = @accountID
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN @lastError
+    END
+
+    IF @accountStatus IS NULL
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN 20001
+    END
+
+    IF @accountStatus = 3 OR @accountStatus = 4
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN 20002
+    END
+ 
+    /* see if a subscription record exists */
+    IF @type = 1
+    BEGIN
+      SELECT @aid = accountID
+        FROM subscriptions
+        WHERE accountID = @accountID
+        AND   type = @type
+        AND   comment = @comment
+    END
+    ELSE BEGIN
+      SELECT @aid = accountID
+        FROM subscriptions
+        WHERE accountID = @accountID
+        AND   type = @type
+    END
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN @lastError
+    END
+
+    /* new subscription */
+    IF @aid IS NULL
+    BEGIN
+      INSERT INTO subscriptions
+        (accountID, type, creationDate, comment, autoRenew, ccID)
+        VALUES (@accountID, @type, @creationDate, @comment, @autoRenew, @ccID)
+
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN 
+        RETURN @lastError
+      END
+      SELECT @lastError = 0
+    END
+    /* updating an existing subscription */
+    ELSE
+    BEGIN
+      UPDATE subscriptions
+        SET type         = @type,
+            creationDate = @creationDate,
+            comment      = @comment,
+            autoRenew    = @autoRenew,
+	    ccID         = @ccID
+        WHERE accountID  = @accountID
+
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN 
+        RETURN @lastError
+      END
+      SELECT @lastError = 1
+   END
+   COMMIT TRAN
+
+   /*
+    * add a history record
+    */
+    DECLARE @reason int
+    SELECT @reason = @type + 20
+    EXEC addAcctHistory @accountID, @reason, @autoRenew, @comment
+  
+   RETURN @lastError
+END
+GO 

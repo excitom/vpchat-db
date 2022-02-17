@@ -1,0 +1,26 @@
+/*
+ * Game results 
+ *
+ * This table was designed to work with the VP Game Club server, but it's
+ * not limited to use with only VP games. For that reason, the table index
+ * is the resultID rather than the gameID, which comes from the Game Club
+ * server. This also works around a potential problem in that the gameID
+ * is not guaranteed to be unique.
+ *
+ * The gameID column is optional.
+ */
+CREATE TABLE gameResults
+(
+	resultID	userIdentifier		 IDENTITY
+                        	CONSTRAINT isPrimary PRIMARY KEY,
+	gameID		userIdentifier		NULL,
+	-- notifyID joins with the notifyLists, privateLists,
+	-- and ladders tables.
+	notifyID	userIdentifier		NOT NULL,
+	userID		userIdentifier		NOT NULL,
+	gameTypeID	userIdentifier		NOT NULL,
+	slot		tinyint			NOT NULL,
+	score		int			NOT NULL,
+	whenPlayed	VpTime			NOT NULL
+)
+GO

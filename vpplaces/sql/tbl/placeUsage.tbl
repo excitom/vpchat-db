@@ -1,0 +1,9 @@
+CREATE TABLE placeUsage
+(
+	time		smalldatetime			NOT NULL,
+	URL		varchar(255)			NOT NULL,
+	title		varchar(255)			NOT NULL,
+	roomUsage	integer				NOT NULL,
+	corridorUsage	integer				NOT NULL
+)
+GO

@@ -1,0 +1,171 @@
+/* add or update information about a PayPal payer
+
+   The accountID parameter is used to make a history record, tieing this
+   credit card to an account for future reference, but the accountID is
+   not part of the cc record since the card may be shared among multiple
+   accounts.
+
+   output: Return value - 0 - success 
+                          20000 - invalid email
+
+	The ccID number is written to output.
+*/
+IF EXISTS(SELECT name FROM sysobjects WHERE name='addPaypalInfo' AND type='P')
+ DROP PROC addPaypalInfo
+GO
+CREATE PROC addPaypalInfo ( 
+	@email		VARCHAR(75),
+	@first_name	VARCHAR(50),
+	@last_name	VARCHAR(50),
+        @payer_status   VARCHAR(20),
+	@accountID	userIdentifier,
+	@payer_id	VARCHAR(20) = NULL,
+	@subscr_id	VARCHAR(200) = NULL
+)
+AS
+BEGIN
+  DECLARE @ccID 	userIdentifier
+  DECLARE @aid 		userIdentifier
+  DECLARE @pid		VARCHAR(20)
+  DECLARE @sid		VARCHAR(200)
+  DECLARE @ps		VARCHAR(20)
+  DECLARE @fn		VARCHAR(50)
+  DECLARE @ln		VARCHAR(50)
+  DECLARE @lastError	int
+  DECLARE @new		bit
+  SELECT  @new = 1
+
+  IF @email IS NULL
+    RETURN 20000
+  SELECT @email = rtrim(ltrim(@email))
+  IF @email IS NULL OR @email = ''
+    RETURN 20000
+
+  BEGIN TRAN
+    
+    SELECT  @ccID = ccID,
+            @ps   = payer_status,
+            @fn   = first_name,
+            @ln   = last_name,
+            @pid  = payer_id
+      FROM paypal
+      WHERE email = @email
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    /* this is a new email */
+    IF @ccID = NULL
+    BEGIN
+      INSERT INTO paypal (
+	email,
+	first_name,
+	last_name,
+	payer_id,
+	payer_status
+      )
+      VALUES (
+	@email,
+	@first_name,
+	@last_name,
+	@payer_id,
+	@payer_status
+      )
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+
+      /* get the new ccID */
+      SELECT @ccID = @@identity
+      SELECT @new = 1
+
+    END
+    /* duplicate email */
+    ELSE
+    BEGIN
+      IF @pid != @payer_id AND @payer_id IS NOT NULL AND @payer_id != ''
+      BEGIN
+      UPDATE paypal
+        SET payer_id = @payer_id
+        WHERE ccID = @ccID
+      END
+
+      IF @fn != @first_name AND @first_name IS NOT NULL AND @first_name != ''
+      BEGIN
+      UPDATE paypal
+        SET first_name = @first_name
+        WHERE ccID = @ccID
+      END
+
+      IF @ln != @last_name AND @last_name IS NOT NULL AND @last_name != ''
+      BEGIN
+      UPDATE paypal
+        SET last_name = @last_name
+        WHERE ccID = @ccID
+      END
+
+      IF @ps != @payer_status AND @payer_status IS NOT NULL AND @payer_status != ''
+      BEGIN
+      UPDATE paypal
+        SET payer_status = @payer_status
+        WHERE ccID = @ccID
+      END
+
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+    END
+
+
+    /*
+     * Update the subscription record, if necessary
+     */
+    IF @accountID IS NOT NULL AND @subscr_id IS NOT NULL AND @subscr_id != ''
+    BEGIN
+      SELECT @aid = accountID
+        FROM subscriptions
+        WHERE type = 1
+        AND accountID = @accountID
+        AND comment = @subscr_id
+        AND ccID IS NULL
+
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+ 
+      IF @aid = @accountID
+      BEGIN
+        UPDATE subscriptions
+          SET ccID = @ccID
+          WHERE accountID = @accountID
+          AND comment = @subscr_id
+          AND type = 1
+
+        SELECT @lastError = @@error
+        IF @lastError != 0
+        BEGIN
+          ROLLBACK TRAN
+          RETURN @lastError
+        END
+      END
+    END
+
+  COMMIT TRAN
+
+  SELECT @ccID AS ccID
+  RETURN 0
+END
+GO

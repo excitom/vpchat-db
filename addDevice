@@ -1,0 +1,47 @@
+#!/bin/sh
+
+# add a database disk device
+
+if [ $# -lt 8 ]
+then
+  # not enough parameters given - show usage message
+  echo $0: usage - 
+  echo addDevice {sybase Root Dir} {Db Content Dir} {device Name} {device Size} {device Phys. Name} {sa Login} {sa Password} {data Server}
+  exit
+else
+  # get parameters
+  sybaseRoot=$1
+  shift
+  ServicesRoot=$1
+  shift
+  deviceName=$1
+  shift
+  deviceSize=$1
+  shift
+  devicePhysName=$1
+  shift
+  saLogin=$1
+  shift
+  saPassword=$1
+  shift
+  dataServer=$1
+  shift
+fi
+
+# find the available devices
+$sybaseRoot/bin/isql -U$saLogin -P$saPassword -S$dataServer \
+ -i $ServicesRoot/showAvailableDevices.sql | grep free | \
+ cut -d" " -f12 > $ServicesRoot/availableDevices.txt
+dbDeviceNumber=`head -1 $ServicesRoot/availableDevices.txt`
+/bin/rm $ServicesRoot/availableDevices.txt
+
+blocksInMegabyte=500
+deviceMbSize=`expr $deviceSize \* $blocksInMegabyte`
+
+$sybaseRoot/bin/isql -U$saLogin -P$saPassword -S$dataServer << !
+DISK INIT     name = $deviceName,
+	  physname = "$devicePhysName",
+            vdevno = $dbDeviceNumber,
+              size = $deviceMbSize
+GO
+!

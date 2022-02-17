@@ -1,0 +1,20 @@
+/*
+ * Players in game ladder tournaments, for team games.
+ *
+ * There is a primary team mate entry in the tournamentPlayers
+ * table. Team mates 2-N are in this table. (At this point, the
+ * only example is Spades, and there is one primary team member
+ * and one secondary team member).
+ *
+ */
+CREATE TABLE teamMates
+(
+	tournID		userIdentifier		NOT NULL,
+	priUserID	userIdentifier		NOT NULL,
+	userID		userIdentifier		NOT NULL,
+	initialRating	int			NOT NULL,
+	buyIn		smallmoney		NULL,
+        confirmed	bit,
+	quit		bit
+)
+GO

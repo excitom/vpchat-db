@@ -1,0 +1,115 @@
+/*
+ * Approve (or disapprove) a request to subscribe to a private list.
+ *
+ * Input: List ID, userID, registration mode (default local)
+ *
+ * Output: 0 = success
+ *         20000 = list not found 
+ *         20001 = list is deleted
+ *         20002 = list is locked
+ *         20003 = user not found 
+ */
+CREATE PROC approveListSubscr (
+	@notifyID	  userIdentifier,
+	@userID		  userIdentifier,
+	@registrationMode VpRegMode = 2
+)
+AS
+BEGIN
+  DECLARE @lastError	int
+  DECLARE @rc		int
+  DECLARE @locked	bit
+  DECLARE @deleted	bit
+  DECLARE @type		int
+  DECLARE @notifyPref	smallint
+
+  BEGIN TRAN
+    SELECT @type = type,
+	   @locked = locked,
+	   @deleted = deleted
+    FROM notifyLists
+    WHERE notifyID = @notifyID
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    IF @type IS NULL
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20000
+    END
+
+    IF @locked = 1
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20002
+    END
+
+    IF @deleted = 1
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20001
+    END
+
+    SELECT @notifyPref = notifyPref
+      FROM pendingListSubscrs
+      WHERE notifyID = @notifyID AND userID = @userID
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    IF @notifyPref IS NULL
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20003
+    END
+
+    INSERT notifySubscrs (notifyID, userID, notifyPref)
+      VALUES(@notifyID, @userID, @notifyPref)
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    DELETE pendingListSubscrs 
+      WHERE notifyID = @notifyID AND userID = @userID
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    /* if this list is associated with a game ladder, 
+     * update the ladder member entry.
+     */
+    IF EXISTS (SELECT * FROM ladderMembers
+      		WHERE notifyID = @notifyID AND userID = @userID)
+    BEGIN
+      UPDATE ladderMembers
+        SET pending = 0
+      	WHERE notifyID = @notifyID AND userID = @userID
+
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+    END
+
+  COMMIT TRAN
+END
+GO

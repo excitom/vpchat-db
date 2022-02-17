@@ -1,0 +1,10 @@
+CREATE TABLE pendingAcctChanges
+(
+	accountID	userIdentifier	UNIQUE NOT NULL,
+	accountType	tinyInt		NULL,
+	billingCycle	tinyInt		NULL,
+	nameLimit	tinyInt		NULL,
+	discount	float		NULL,
+	unitCost	smallmoney	NULL
+)
+GO

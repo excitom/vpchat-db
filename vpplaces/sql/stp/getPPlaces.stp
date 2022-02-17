@@ -1,0 +1,10 @@
+/* find all persistent places */
+CREATE PROC getPPlaces
+AS
+BEGIN
+  SELECT *
+    FROM persistentPlaces
+
+END
+GO 
+

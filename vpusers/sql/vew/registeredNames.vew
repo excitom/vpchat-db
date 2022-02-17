@@ -1,0 +1,6 @@
+CREATE VIEW registeredNames
+AS
+  SELECT users.userID, nickName, email, password
+    FROM users, registration
+    WHERE users.userID = registration.userID
+GO

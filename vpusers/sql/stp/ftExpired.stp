@@ -1,0 +1,108 @@
+/*
+ * Find free trial subscriptions that have expired, meaning it's
+ * time to settle the original transaction and convert the account
+ * to "regular" status.
+ *
+ * Input: flag - 0 -> browse only
+ *               1 -> clear the held payments
+ *        flag - 0 -> process all expired accts
+ *               1 -> skip inactive (unused) accts
+ *
+ * Output: 
+ *
+ * For each expired subscription, several rows are output.
+ * - S1 accountID orderID shopperID 
+ * - S2 amount paymentDate
+ * - S3 email
+ * - S4 comment
+ */
+CREATE PROC ftExpired (
+  @clearNow   bit = 0,
+  @skipUnused bit = 0
+)
+AS
+BEGIN
+  DECLARE @lastError	int
+  DECLARE @accountID 	userIdentifier
+  DECLARE @paymentID 	userIdentifier
+  DECLARE @paymentDate	VpTime
+  DECLARE @amount	smallmoney
+  DECLARE @AVS_result	varchar(10)
+  DECLARE @shopperID	varchar(42)
+  DECLARE @orderID	varchar(10)
+  DECLARE @approvalCode	varchar(6)
+  DECLARE @email	longName
+  DECLARE @comment	longName
+  DECLARE @expireDate	VpTime
+  DECLARE @diffFromGMT	int
+  DECLARE @skip         bit
+    
+  SELECT @diffFromGMT = gmt
+    FROM getGMT
+  IF @diffFromGMT IS NULL
+    SELECT @diffFromGMT = 0
+   
+  SELECT @lastError = @@error
+  IF @lastError != 0
+  BEGIN
+    RETURN @lastError
+  END
+
+  SELECT @expireDate = dateadd( hour, (-1) * @diffFromGMT, getdate() )
+
+  DECLARE ftCursor CURSOR
+     FOR SELECT heldPayments.accountID, paymentDate, orderID, AVS_result,
+		amount, email, shopperID, approvalCode, comment, paymentID
+       FROM  heldPayments, userAccounts
+       WHERE renewalDate < @expireDate
+       AND   paymentStatus = 5
+       AND   accountStatus = 2
+       AND   heldPayments.accountID = userAccounts.accountID
+
+  OPEN ftCursor
+  FETCH ftCursor INTO @accountID, @paymentDate, @orderID, @AVS_result,
+		@amount, @email, @shopperID, @approvalCode, @comment, @paymentID
+  WHILE ( @@sqlstatus = 0 )
+  BEGIN
+    SELECT @skip = 0
+    IF @skipUnused = 1 
+    BEGIN
+      /*
+       * an account is considered unused is there is only one
+       * name in it, and it was never signed in.
+       */
+      IF  ((SELECT COUNT(userID)
+            FROM registration
+            WHERE accountID = @accountID) = 1)
+      AND ((SELECT lastSignOnDate
+            FROM registration
+            WHERE userID = @accountID) IS NULL)
+      BEGIN
+        SELECT @skip = 1
+      END
+    END
+    IF @skip = 0
+    BEGIN
+      /*
+       * send information to output
+       */
+      SELECT 'S1', @accountID, @orderID, @shopperID
+      SELECT 'S2', @amount, @approvalCode, @AVS_result, @paymentDate 
+      SELECT 'S3', @email
+      SELECT 'S4', @comment
+
+      /*
+       * clear the held payment
+       */
+      IF @clearNow = 1
+      BEGIN
+        EXEC clearPayment @paymentID, 3
+      END
+    END
+
+    FETCH ftCursor INTO @accountID, @paymentDate, @orderID, @AVS_result,
+		@amount, @email, @shopperID, @approvalCode, @comment, @paymentID
+  END
+  CLOSE ftCursor
+END
+GO

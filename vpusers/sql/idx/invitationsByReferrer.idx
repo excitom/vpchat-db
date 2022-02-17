@@ -1,0 +1,3 @@
+CREATE INDEX invitationsByReferrer
+ON invitations ( referredByID )
+GO

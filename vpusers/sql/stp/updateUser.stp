@@ -1,0 +1,103 @@
+/* get name and registration mode of user,
+  add to users table if necessary          --- */
+/* input: user ID (passed "by name"-for output), 
+          user name, registration mode,
+          allow Aux as local (optional - default = FALSE)
+   output: return value -
+             0 - added the user
+             20001 - user already existed
+             20002 - can't add user in local reg.mode
+                     (unless @allowAuxAsLocal = TRUE)
+           in User ID parameter -
+             0 - in case user was not found,
+             otherwise the ID for the matching user
+*/
+CREATE PROC updateUser
+( 
+  @userID userIdentifier OUTPUT,
+  @userName VPuserID, 
+  @regMode VpRegMode,
+  @allowAuxAsLocal bit = 0
+)
+AS
+BEGIN
+  DECLARE @lastError int
+  DECLARE @localTransaction bit
+  SELECT @userID = 0
+  
+  SELECT @localTransaction =  1 - sign( @@trancount )
+  
+  IF ( @localTransaction = 1 )
+    BEGIN TRAN updateUser
+    
+    IF ( ( @allowAuxAsLocal = 1 ) AND
+         ( @regMode = 2 ) )
+
+    BEGIN
+      /* for the case where usage of auxiliary registration
+         database is allowed, check to see if user exists
+         with either local registration mode or 
+         auxiliary regitration mode */
+      SELECT @userID = userID
+        FROM users
+        WHERE ( nickName = @userName ) AND
+              ( registrationMode IN (2,3) )
+    END
+    ELSE
+    BEGIN
+      /* do normal test to see if user exists in users table */
+      SELECT @userID = userID
+        FROM users
+        WHERE ( nickName = @userName ) AND
+              ( registrationMode = @regMode )
+    END
+      
+    SELECT @lastError = @@error
+    IF ( @lastError != 0 )
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+    
+    IF ( @userID > 0 )
+    BEGIN
+      /* user already exists in the database -
+         Return status 20001 marks this */
+      IF @localTransaction = 1
+        COMMIT TRAN updateUser
+      RETURN 20001
+    END
+    
+    IF ( ( @userID = 0 )  AND 
+         ( @regMode = 2 )     )
+    BEGIN
+      IF ( @allowAuxAsLocal = 0 )
+      BEGIN
+        IF @localTransaction = 1
+          ROLLBACK TRAN updateUser
+        RETURN 20002
+      END
+      ELSE
+      BEGIN
+        /* let user be recorded as auxiliary registered */
+        SELECT @regMode = 3
+      END
+    END
+    
+    INSERT users ( nickName, registrationMode, locked, restricted, penalties, warnings, ignores )
+      VALUES ( @userName, @regMode, 0, 0, 0, 0, 0 )
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    SELECT @userID = @@identity
+    
+  IF @localTransaction = 1
+    COMMIT TRAN updateUser
+
+END
+GO 

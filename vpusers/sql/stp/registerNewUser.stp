@@ -1,0 +1,197 @@
+/* add a new user */
+/* input:  user name, user's email address, password (optional)
+   output: return value -
+           negative value - DB failure, 
+           0 - success,
+           20001 - exceeded number of permitted accounts per email
+           20002 - user name already in DB
+           20003 - user name is banned  */
+CREATE PROC registerNewUser
+( 
+  @nickName VPuserID,
+  @email longName,
+  @password VPPassword = NULL
+)
+AS
+BEGIN
+  SELECT @email = lower(@email)
+  DECLARE @localMode integer
+  SELECT @localMode = 2
+  DECLARE @accountsPermitted integer
+  DECLARE @diffFromGMT int
+  DECLARE @currentDate VpTime
+  DECLARE @buddyListName VPuserID
+  DECLARE @buddyListNameMask VPuserID
+  DECLARE @maxAutoName VPuserID
+  DECLARE @nextAutoNumber int
+  DECLARE @accountsForEmail integer
+  DECLARE @newUserID userIdentifier
+  DECLARE @lastError int
+  
+  SELECT @buddyListName = "bdylist"
+  SELECT @buddyListNameMask = @buddyListName + "%"
+  
+  /* turn all user ID to lower case, to get case insensitive comparisons */
+  SELECT @nickName = lower(@nickName)
+  SELECT @nickName = ltrim(@nickName)
+  IF ( @nickName LIKE @buddyListNameMask )
+  BEGIN
+    -- banned name - "bdylist" is reserved for nick names
+    -- to be automatically given to buddy list users
+    RETURN 20003
+  END
+  
+
+  BEGIN TRAN registerNewUser
+    SELECT @diffFromGMT = gmt
+      FROM getGMT
+    IF @diffFromGMT IS NULL
+      SELECT @diffFromGMT = 0
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN registerNewUser
+      RETURN @lastError
+    END
+
+    SELECT @currentDate = dateadd( hour, (-1) * @diffFromGMT, getdate() )
+    
+    IF char_length(@nickName) > 0
+    BEGIN
+      /* check if name is banned */
+      IF EXISTS 
+        ( SELECT nickName FROM bannedNames 
+            WHERE substring( @nickName, 1, char_length(nickName) )= nickName )
+      BEGIN
+        COMMIT TRAN registerNewUser
+        RETURN 20003
+      END
+      
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN registerNewUser
+        RETURN @lastError
+      END
+
+      IF EXISTS
+        ( SELECT nickName FROM deadNames 
+          WHERE @nickName = nickName )
+      BEGIN
+        ROLLBACK TRAN registerNewUser
+        RETURN 20003
+      END
+     
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN registerNewUser
+        RETURN @lastError
+      END
+      
+      IF EXISTS 
+        ( SELECT nickName 
+            FROM users
+            WHERE ( nickName = @nickName ) AND
+                  ( registrationMode = 2 )     )
+      BEGIN
+        COMMIT TRAN registerNewUser
+        RETURN 20002
+      END
+      
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN registerNewUser
+        RETURN @lastError
+      END
+      
+    END
+    ELSE
+    BEGIN
+      /* empty nick name - 
+         make a name for the user */
+      SELECT @nextAutoNumber = 
+        max( convert( int, 
+                      substring( nickName, 
+                                 char_length(@buddyListName)+1,
+                                 20 ) ) ) /* hopefully, 20 digits will cover */
+        FROM users
+        WHERE ( nickName LIKE @buddyListNameMask ) AND
+              ( registrationMode = 2 )
+      IF @nextAutoNumber IS NULL
+        SELECT @nextAutoNumber = 1
+      ELSE
+      BEGIN
+        /* find the number */
+        SELECT @nextAutoNumber = @nextAutoNumber + 1
+      END
+      SELECT @nickName = @buddyListName + ltrim(str(@nextAutoNumber))
+    END
+    SELECT @accountsPermitted = intValue
+      FROM configurationKeys
+      WHERE keyName = "maxAccountsPerEmail"
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN registerNewUser
+      RETURN @lastError
+    END
+    
+    SELECT @accountsForEmail = count(*) 
+      FROM registration
+      WHERE ( email = @email )
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN registerNewUser
+      RETURN @lastError
+    END
+    
+    IF @accountsForEmail >= @accountsPermitted
+    BEGIN
+    COMMIT TRAN registerNewUser
+      RETURN 20001
+    END
+    ELSE
+    BEGIN
+      /* OK to insert user to DB */
+      INSERT users ( nickName, registrationMode, locked, restricted, penalties, warnings, ignores )
+        VALUES ( @nickName, @localMode, 0, 0, 0, 0, 0 )
+      
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN registerNewUser
+        RETURN @lastError
+      END
+      
+      SELECT @newUserID = @@identity
+      
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN registerNewUser
+        RETURN @lastError
+      END
+      
+      INSERT INTO registration
+        ( userID, email, password, registrationDate, accountID ) 
+        VALUES ( @newUserID, @email, @password, @currentDate, @newUserID )
+      
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN registerNewUser
+        RETURN @lastError
+      END
+      
+      SELECT @newUserID
+    END
+    /* returns 0 if successful, negative value otherwise */
+  COMMIT TRAN registerNewUser
+END
+GO 

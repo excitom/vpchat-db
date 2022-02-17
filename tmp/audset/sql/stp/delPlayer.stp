@@ -1,0 +1,267 @@
+/*
+ * Remove a player from a tournament.
+ *
+ * Input: EventID, UserID
+ *        Flag: 0 = resigned, 1 = removed
+ *
+ * Output: 0 = success
+ *         20000 = no such tournament
+ *         20001 = no such player
+ *         20002 = cannot delete (reg closed)
+ *	   20003 = problem refunding points/money
+ */
+IF EXISTS
+ (SELECT name FROM sysobjects WHERE name = 'delPlayer' AND type = 'P') 
+ DROP PROC delPlayer
+GO  
+CREATE PROC delPlayer (
+  @userID	userIdentifier,
+  @tournID	userIdentifier,
+  @force	bit = 0
+)
+AS
+BEGIN
+  DECLARE @lastError	integer
+  DECLARE @buyIn	smallmoney
+  DECLARE @status	tinyint
+  DECLARE @uid		userIdentifier
+  DECLARE @pri		bit
+  DECLARE @td		bit
+  DECLARE @confirmed	bit
+  DECLARE @nickName	VPuserID
+
+  BEGIN TRAN
+    SELECT @status = NULL
+    SELECT @status = status FROM tournaments
+      WHERE tournID = @tournID
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    IF @status IS NULL
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20000
+    END
+
+    IF NOT EXISTS (SELECT * FROM tournamentPlayers
+			WHERE tournID = @tournID
+			AND userID = @userID
+			AND td = 0)
+    BEGIN
+      IF NOT EXISTS (SELECT * FROM teamMates
+			  WHERE tournID = @tournID
+			  AND userID = @userID)
+      BEGIN
+        ROLLBACK TRAN
+        RETURN 20001
+      END
+      SELECT @pri = 0
+    END
+    ELSE BEGIN
+      SELECT @pri = 1
+    END
+
+    /*
+     * If registration is open, the player can back out with no penalty.
+     * Otherwise, the player forfeits entry fee and remaining games,
+     * unless the tournament is finished or cancelled - in which case
+     * resigning is pointless.
+     */
+    IF @status != 0x01		-- open for registration?
+    BEGIN
+      IF @status = 0x04		-- finished ?
+      OR @status = 0x08		-- cancelled ?
+      BEGIN
+        ROLLBACK TRAN
+        RETURN 20002
+      END
+
+      /* Forfeit games and entry fee */
+
+      ELSE BEGIN
+        IF @pri = 1
+        BEGIN
+          UPDATE tournamentPlayers
+            SET quit = 1
+            WHERE tournID = @tournID AND userID = @userID
+        END
+        ELSE BEGIN
+          UPDATE teamMates
+            SET quit = 1
+            WHERE tournID = @tournID AND userID = @userID
+        END
+
+        COMMIT TRAN
+
+        EXEC vpusers..addAcctHistory @userID, 70, @tournID
+        RETURN 0
+      END 
+    END
+
+    /* Back out with no penalty */
+
+    SELECT @buyIn = buyIn, @td = td
+      FROM tournamentPlayers WHERE tournID = @tournID
+      AND userID = @userID
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    /* Non-team game or primary player in a team game */
+    IF @pri = 1
+    BEGIN
+      /*
+       * Refund points, if necessary
+       */
+      IF @buyIn > 0 AND @td = 0
+      BEGIN
+        EXEC @lastError = vpusers..updateUserPoints @userID, @buyIn
+        IF @@trancount = 0 OR @lastError != 0
+        BEGIN
+          IF @@trancount > 0
+            ROLLBACK TRAN
+          RETURN 20003
+        END
+      END
+
+      DELETE tournamentPlayers
+        WHERE userID = @userID AND tournID = @tournID AND td = 0
+
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+
+      UPDATE brackets
+        SET player = NULL
+        WHERE player = @userID AND tournID = @tournID
+
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+
+      DECLARE @secUserID userIdentifier
+      SELECT @secUserID = userID, @buyIn = buyIn, @confirmed = confirmed
+        FROM teamMates
+        WHERE tournID = @tournID
+        AND priUserID = @userID
+
+      /* If deleting the primary player and there is a team mate,
+       * delete the team mate also.
+       */
+      IF @secUserID IS NOT NULL
+      BEGIN
+
+        /* Refund points, if necessary */
+        IF @buyIn > 0 AND @confirmed = 1
+        BEGIN
+          EXEC @lastError = vpusers..updateUserPoints @secUserID, @buyIn
+          IF @@trancount = 0 OR @lastError != 0
+          BEGIN
+            IF @@trancount > 0
+              ROLLBACK TRAN
+            RETURN 20003
+          END
+        END
+
+        DELETE teamMates
+          WHERE userID = @secUserID AND tournID = @tournID
+      END
+    END
+
+    /* Deleting a team mate (the seconday player) */
+    ELSE BEGIN
+      SELECT @buyIn = buyIn, @confirmed = confirmed
+        FROM teamMates
+        WHERE tournID = @tournID
+        AND    userID = @userID
+
+      /* Refund points only if the player was confirmed, since points
+       * are not debited until the player confirms.
+       */
+      IF @buyIn > 0 AND @confirmed = 1
+      BEGIN
+        EXEC @lastError = vpusers..updateUserPoints @userID, @buyIn
+        IF @@trancount = 0 OR @lastError != 0
+        BEGIN
+          IF @@trancount > 0
+            ROLLBACK TRAN
+          RETURN 20003
+        END
+      END
+
+      DELETE teamMates
+        WHERE userID = @userID AND tournID = @tournID
+    END
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    /* update the default seedings for the first round bracket */
+
+    UPDATE brackets SET player = NULL
+      WHERE tournID = @tournID
+      AND round = 1
+
+    DECLARE playerCursor CURSOR
+      FOR SELECT userID, initialRating
+        FROM tournamentPlayers
+        WHERE tournID = @tournID
+        AND        td = 0
+        ORDER BY initialRating DESC
+
+    DECLARE @i integer
+    DECLARE @rating integer
+    SELECT @i = 1
+    OPEN playerCursor
+    FETCH playerCursor INTO @uid, @rating
+    WHILE ( @@sqlstatus = 0 ) 
+    BEGIN
+      UPDATE brackets
+        SET player = @uid
+        WHERE tournID = @tournID
+        AND   round = 1
+        AND   seed  = @i
+
+        SELECT @lastError = @@error
+        IF @lastError != 0
+        BEGIN
+          CLOSE playerCursor
+          ROLLBACK TRAN 
+          RETURN @lastError
+        END
+
+        FETCH playerCursor INTO @uid, @rating
+        SELECT @i = @i + 1
+    END
+    CLOSE playerCursor
+
+  COMMIT TRAN
+
+  SELECT @nickName = nickName FROM vpusers..users WHERE userID=@userID
+  IF @force = 1
+    EXEC addTournamentMsg @tournID, 0, 10, @nickName
+  ELSE
+    EXEC addTournamentMsg @tournID, 0, 9, @nickName
+  EXEC vpusers..addAcctHistory @userID, 69, @tournID
+
+END
+GO

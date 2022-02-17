@@ -1,0 +1,131 @@
+/* check if user name/password is valid in aux database
+
+  Returns:
+  20000 - OK
+  20001 - not registered
+  20002 - incorrect password
+  20003 - locked
+  20004 - restricted
+*/
+IF EXISTS(SELECT name FROM sysobjects WHERE name='checkAux' AND type='P')
+ DROP PROC checkAux
+GO
+CREATE PROC checkAux ( @userToCheck longName, @passwordToCheck VPPassword, @adult tinyint = 1 )
+AS
+BEGIN
+  --  set isolation level to 0
+  set transaction isolation level 0
+  
+  SELECT @userToCheck = lower(@userToCheck)
+  DECLARE @lastError int
+  
+  DECLARE @userID userIdentifier
+  DECLARE @password VPPassword
+  DECLARE @locked bit
+  DECLARE @restricted bit
+  
+  BEGIN TRAN checkAux
+
+    IF CHARINDEX('@', @userToCheck) > 0
+    BEGIN
+      /* checking a buddy name */
+      SELECT @userID = users.userID,
+             @locked = locked,
+             @restricted = restricted,
+             @password = password
+        FROM users,registration
+        WHERE ( registrationMode = 2) AND 
+              ( email = @userToCheck ) AND
+              ( deleteDate IS NULL ) AND
+              ( users.userID = registration.userID)
+    END
+    ELSE
+    BEGIN
+      /* checking a user name */
+      SELECT @userID = users.userID,
+             @locked = locked,
+             @restricted = restricted,
+             @password = password
+        FROM users,registration
+        WHERE ( registrationMode = 2) AND 
+              ( nickName = @userToCheck ) AND
+              ( deleteDate IS NULL ) AND
+              ( users.userID = registration.userID)
+    END
+  
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN checkAux
+      RETURN @lastError
+    END
+      
+    IF @userID IS NULL
+    BEGIN
+      ROLLBACK TRAN checkAux
+      RETURN 20001
+    END
+
+    IF @locked = 1
+    BEGIN
+      ROLLBACK TRAN checkAux
+      RETURN 20003
+    END
+
+    -- IF @restricted = 1 AND @adult = 1
+    IF @restricted = 1 
+    BEGIN
+      ROLLBACK TRAN checkAux
+      RETURN 20004
+    END
+      
+    IF @password IS NULL
+    BEGIN
+      ROLLBACK TRAN checkAux
+      RETURN 20001
+    END
+
+    IF @passwordToCheck != @password
+    BEGIN
+      ROLLBACK TRAN checkAux
+      RETURN 20002
+    END
+      
+    -- Removed for performance reasons. Updates should be done by a 
+    -- script in batch mode, to streamline the chat signin process.
+    -- Also, it is misleading to do it here, since failed attempts
+    -- (e.g. due to bad password) still update the signin date.
+
+    -- DECLARE @now VpTime
+    -- DECLARE @diffFromGMT int
+
+    -- SELECT @diffFromGMT = gmt
+    -- FROM getGMT
+      
+    -- SELECT @lastError = @@error
+    -- IF @lastError != 0
+    -- BEGIN
+      -- ROLLBACK TRAN checkAux
+      -- RETURN @lastError
+    -- END
+
+    -- IF @diffFromGMT IS NULL
+      -- SELECT @diffFromGMT = 0
+    
+    -- SELECT @now = dateadd( hour, (-1) * @diffFromGMT, getdate() )
+
+    -- UPDATE registration
+      -- SET lastSignOnDate = @now
+      -- WHERE userID = @userID
+
+    -- SELECT @lastError = @@error
+    -- IF @lastError != 0
+    -- BEGIN
+      -- ROLLBACK TRAN checkAux
+      -- RETURN @lastError
+    -- END
+
+  COMMIT TRAN checkAux
+  RETURN 20000
+END
+GO 

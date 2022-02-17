@@ -1,0 +1,129 @@
+/* 
+ * Validate a payment transaction
+ *
+ * Return: 0 = OK
+ *         20000 = invoice not found
+ *         20001 = invoice mismatch
+ *         20002 = OK but duplicate close
+ *         20003 = update attempt but ccID/type already set
+ *         20004 = can't update and close at the same time
+ *         20005 = can't set ccID or type to NULL
+ *         20006 = update attempt but already closed
+ */
+CREATE PROC checkTransaction (
+  @accountID	userIdentifier,
+  @ccID		userIdentifier,
+  @type		tinyint,
+  @amount	smallmoney,
+  @invoice	longName,
+  @update	bit = 0,
+  @close	bit = 0
+)
+AS
+BEGIN
+  DECLARE @lastError	int
+  DECLARE @t_accountID	userIdentifier
+  DECLARE @t_ccID	userIdentifier
+  DECLARE @t_type	tinyint
+  DECLARE @t_amount	smallmoney
+  DECLARE @completed    bit
+
+  IF @update = 1 AND @close = 1
+  BEGIN
+    RETURN 20004
+  END
+
+  BEGIN TRAN
+    
+    SELECT @t_accountID = accountID,
+           @t_ccID      = ccID,
+           @t_type      = type,
+           @t_amount    = amount,
+           @completed   = completed
+      FROM transactions
+      WHERE invoice = @invoice
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    IF @t_accountID IS NULL
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20000
+    END
+
+    IF @t_accountID != @accountID
+    OR (@t_amount > 0 AND @t_amount != @amount)
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20001
+    END
+
+    IF @update = 1
+    BEGIN
+      IF @completed = 1
+      BEGIN
+        ROLLBACK TRAN
+        RETURN 20006
+      END
+
+      IF @ccID IS NULL OR @type IS NULL
+      BEGIN
+        ROLLBACK TRAN
+        RETURN 20005
+      END
+
+      IF @t_ccID IS NOT NULL OR @t_type IS NOT NULL
+      BEGIN
+        IF @t_ccID != @ccID OR @t_type != @type
+        BEGIN
+          ROLLBACK TRAN
+          RETURN 20003
+        END
+      END
+
+      UPDATE transactions SET ccID = @ccID, type = @type, amount = @amount
+        WHERE invoice = @invoice
+
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+    END
+
+    IF @close = 1
+    BEGIN
+      IF @completed = 1
+      BEGIN
+        ROLLBACK TRAN
+        RETURN 20002
+      END
+
+      IF @t_ccID != @ccID
+      OR @t_type != @type
+      BEGIN
+       ROLLBACK TRAN
+       RETURN 20001
+      END
+
+      UPDATE transactions SET completed = 1 WHERE invoice = @invoice 
+
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+    END
+
+  COMMIT TRAN
+
+  RETURN 0
+END
+GO

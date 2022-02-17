@@ -1,0 +1,16 @@
+/*
+ * Paypal subscription payments are identified (as they arrive from Paypal)
+ * by email address. If the email address for an account is changed, this
+ * will make it difficult to determine the account to credit when the next
+ * subscription payment arrives. 
+ * 
+ * The purpose of this table is to track the original Paypal address when
+ * the account email address is changed.
+ *
+ */
+CREATE TABLE paypalEmail
+(
+	email			longName	NOT NULL,
+	accountID		userIdentifier	NOT NULL
+)
+GO

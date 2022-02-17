@@ -1,0 +1,45 @@
+/* update the lock flag in a user record */
+/* 
+   output: Return value - 0 - success 
+                          20001 - No such account existed in database
+*/
+CREATE PROC updateUserLock (
+  @userID userIdentifier,
+  @locked bit,
+  @URL VPuserID )
+AS
+BEGIN
+  DECLARE @lastError int
+  
+  BEGIN TRAN
+    
+    IF NOT EXISTS (SELECT * FROM users WHERE userID = @userID)
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20001
+    END
+
+    UPDATE users
+      SET locked = @locked
+      WHERE userID = @userID
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+  COMMIT TRAN
+
+  /*
+   * lock user home page, if any.
+   * this is done outside the transaction since it's not super
+   * critical that it succeed and we don't want failure to undo 
+   * the previous operation
+   */
+   EXEC vpplaces..updateHomePage @userID, 'L', @locked, @URL
+ 
+  RETURN 0
+END
+GO

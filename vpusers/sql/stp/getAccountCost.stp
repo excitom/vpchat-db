@@ -1,0 +1,107 @@
+/*
+ * Determine costs associated with a user account
+ * - unit cost of the subscription
+ * - unit cost of add-ons
+ * - unit cost of subscr plus add-ons
+ * - number off add-ons
+ * - current account balance
+ * - base subscription cost
+ * - gross renewal cost (subscr + add-ons - discount)
+ * - net renewal cost (gross - account credit)
+ * - referral bonus
+ */
+CREATE PROC getAccountCost ( @accountID userIdentifier )
+AS
+BEGIN
+  DECLARE @balanceDue		smallmoney
+  DECLARE @unitCost		smallmoney
+  DECLARE @addOnCost		smallmoney
+  DECLARE @totalUnitCost  	smallmoney
+  DECLARE @discountAmount  	smallmoney
+  DECLARE @grossCost	  	smallmoney
+  DECLARE @netCost	  	smallmoney
+  DECLARE @subscrCost	  	smallmoney
+  DECLARE @referralBalance  	smallmoney
+  DECLARE @discount		float
+  DECLARE @accountStatus	int
+  DECLARE @billingCycle		int
+  DECLARE @addOns		int
+  DECLARE @lastError		int
+  DECLARE @aid			userIdentifier
+
+  BEGIN TRAN
+    SELECT @unitCost = unitCost,
+	   @discount = discount,
+	   @billingCycle = billingCycle,
+	   @accountStatus = accountStatus,
+	   @aid = accountID
+      FROM userAccounts
+      WHERE accountID = @accountID
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    IF @aid != @accountID
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20001
+    END
+
+    SELECT @addOns = COUNT(unitCost),
+ 	   @addOnCost = SUM(unitCost)
+      FROM services
+      WHERE accountID = @accountID
+      -- AND unitCost > 0
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    IF @addOns = 0
+    BEGIN
+      SELECT @addOnCost = 0
+    END
+
+    SELECT @balanceDue = subscription,
+           @referralBalance = referral
+      FROM accountBalance
+      WHERE accountID = @accountID
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN @lastError
+    END
+
+    SELECT @totalUnitCost = @unitCost + @addOnCost
+    SELECT @grossCost = @totalUnitCost * @billingCycle
+    SELECT @discountAmount = @grossCost * @discount
+    SELECT @grossCost = @grossCost - @discountAmount
+    IF @accountStatus = 0
+    BEGIN
+      SELECT @netCost = @grossCost + @balanceDue
+    END
+    ELSE BEGIN
+      SELECT @netCost = @balanceDue
+    END
+    SELECT @subscrCost = @unitCost * @billingCycle
+    SELECT @discountAmount = @subscrCost * @discount
+    SELECT @subscrCost = @subscrCost - @discountAmount
+
+    SELECT @unitCost AS unitCost, @totalUnitCost AS totalUnitCost,
+    	@addOns AS addOns, @balanceDue AS balanceDue,
+	@subscrCost AS subscriptionCost,
+	@grossCost AS grossCost, @netCost AS netCost,
+	@referralBalance AS referralBalance
+
+  COMMIT TRAN
+END
+GO

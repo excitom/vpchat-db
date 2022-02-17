@@ -1,0 +1,15 @@
+/* get details for one event */
+/* input:  event id
+   output: event title, auditorium name
+*/
+CREATE PROC getEventHeader ( @eventID eventIdentifier )
+AS
+
+    SELECT events.title, auditoriums.name
+      FROM events, auditoriums
+      WHERE events.eventID = @eventID AND
+            events.auditorium = auditoriums.auditoriumID
+
+GO
+
+

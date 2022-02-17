@@ -1,0 +1,63 @@
+/* delete a place from under a category */
+/*
+  INPUT  : parent category, URL to delete
+  OUTPUT : return value - 0 if successful
+                          20001 if given category does not exist
+                          20002 if given place does not exist
+                                for this category
+*/
+CREATE PROC delPlaceFromCategory
+(
+  @parentCategory categoryIdentifier,
+  @URL UrlType
+)
+AS
+BEGIN
+  DECLARE @lastError int
+  DECLARE @category categoryIdentifier
+  DECLARE @rowsDeleted int
+  DECLARE @canonicURL UrlType
+
+  SELECT @canonicURL = lower(@URL)
+  
+  BEGIN TRAN delPlaceFromCategory
+    SELECT @category = category
+      FROM categories
+      WHERE ( category = @parentCategory )
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN delPlaceFromCategory
+      RETURN @lastError
+    END
+    
+    IF ( @category IS NULL )
+    BEGIN
+      ROLLBACK TRAN delPlaceFromCategory
+      RETURN 20001
+    END
+    
+    DELETE placeCategories
+      WHERE ( category = @parentCategory ) AND
+            ( lower(URL) = @canonicURL )
+    
+    SELECT @lastError = @@error
+    SELECT @rowsDeleted = @@rowcount
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN delPlaceFromCategory
+      RETURN @lastError
+    END
+    
+    IF ( @rowsDeleted = 0 )
+    BEGIN
+      ROLLBACK TRAN delPlaceFromCategory
+      RETURN 20002
+    END
+    
+  COMMIT TRAN delPlaceFromCategory
+END
+GO 
+GRANT EXECUTE ON delPlaceFromCategory TO vpusr
+GO

@@ -1,0 +1,75 @@
+/* get the usage statistics for a given period of time, by month
+   NOTE: dailyUsage is used, so statistics are good only
+         up to the previous day
+
+  INPUT  : startTime, endTime
+  OUTPUT : time, 
+           summary values - ( all users, chat users, Buddy list users ) X 
+                            (maximum)
+
+           e.g. if summary is desired for period starting on 
+           January 1st 1997, and ending on December 31st 1997, values will look like this:
+
+           1997 1 1 00:00 <all-max> <chat-max> <bl-max>  
+           1997 2 1 00:00 <all-max> <chat-max> <bl-max>  
+           1997 3 1 00:00 <all-max> <chat-max> <bl-max>  
+            .   . . .      .	                       
+            .   . . .      .	                       
+            .   . . .      .	                       
+            .   . . .      .	                       
+            .   . . .      .	                       
+           1997 12 1 00:00 <all-max> <chat-max> <bl-max>>
+
+           where each <braced value> is a 4-byte-representable integer.
+           note that the starting days for the respective months are used,
+           so that the data is correct for all of the regarded month.
+*/
+CREATE PROC getMonthlyMaxStatistics
+(
+  @startTime VpTime,
+  @endTime VpTime
+)
+AS
+BEGIN
+  /* first fix times to include each possible entry from the given months */
+  /* make @startTime be 00:00 of the first day on the month which @startTime belongs to */
+  SELECT @startTime = dateadd( day, 1 - datepart(day,@startTime), @startTime )
+  SELECT @startTime = dateadd( hour, (-1) * datepart(hour,@startTime), @startTime )
+  SELECT @startTime = dateadd( minute, (-1) * datepart(minute,@startTime), @startTime )
+  
+  /* make @endTime be 23:59 of the last day on the month which @endTime belongs to */
+  SELECT @endTime = dateadd( month, 1, @endTime )
+  SELECT @endTime = dateadd( day, (-1) * datepart(day,@endTime), @endTime )
+  SELECT @endTime = dateadd( hour, 23 - datepart(hour,@endTime), @endTime )
+  SELECT @endTime = dateadd( minute, 59 - datepart(minute,@endTime), @endTime )
+  
+  SELECT DISTINCT
+         year=datepart( year, d1.time), 
+         month=datepart( month, d1.time), 
+         day=1, /* monthly summary, so day & hour are meaningless */
+         hour=0,
+         allMax=max(d1.value),
+         chatMax=max(d2.value),
+         BlMax=max(d3.value)
+  FROM
+         dailyUsage d1,
+         dailyUsage d2,
+         dailyUsage d3
+  WHERE	    
+         ( d1.time BETWEEN @startTime AND @endTime ) AND
+         ( d2.time BETWEEN @startTime AND @endTime ) AND
+         ( d3.time BETWEEN @startTime AND @endTime ) AND
+         ( datepart(year,d2.time) = datepart(year,d1.time) ) AND
+         ( datepart(month,d2.time) = datepart(month,d1.time) ) AND
+         ( datepart(year,d3.time) = datepart(year,d1.time) ) AND
+         ( datepart(month,d3.time) = datepart(month,d1.time) ) AND
+         (d1.userType=0) AND (d1.valueType=2) AND
+         (d2.userType=1) AND (d2.valueType=2) AND
+         (d3.userType=2) AND (d3.valueType=2)
+
+  GROUP BY datepart( year, d1.time), datepart( month, d1.time)
+  ORDER BY year, month
+
+
+END
+GO 

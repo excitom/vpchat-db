@@ -1,0 +1,82 @@
+/*
+   get table inforamtion
+   
+   name   : sp_tableinfo
+   input  : 
+*/
+USE sybsystemprocs
+GO
+CREATE PROCEDURE sp_tableinfo
+(
+  @s1 varchar(30) = NULL,
+  @s2 char(1)     = NULL
+)
+AS
+BEGIN
+  DECLARE @pagekb    int
+  DECLARE @objname   varchar(30)
+  DECLARE @size_unit char(1)
+  
+  IF ( @s1 LIKE "[kKpP]" )
+  BEGIN
+    SELECT @size_unit = @s1
+    SELECT @objname   = NULL
+  END
+  ELSE
+  BEGIN
+    SELECT @objname   = @s1
+    SELECT @size_unit = @s2
+  END
+  SELECT @size_unit = upper(@size_unit)
+  
+  SELECT @pagekb = low/1024
+    FROM master..spt_values
+    WHERE  ( number = 1 ) AND
+           ( type   = "E" )
+  SELECT tabname    = o.name,
+         id         = i.id,
+         total_res_pgs = sum(reserved_pgs(i.id,i.doampg) + 
+                         reserved_pgs(i.id,i.ioampg)),
+         data_use_pgs  = sum(data_pgs(i.id,i.doampg)),
+         ind_use_pgs   = sum(data_pgs(i.id,i.ioampg))
+  INTO #temp_info
+    FROM sysindexes i, sysobjects o
+    WHERE ( i.id  = o.id ) AND
+          ( ( o.name = @objname ) OR ( @objname IS NULL ) ) AND
+          ( o.type   = "U" )
+    GROUP BY o.name, i.id
+
+  IF ( @size_unit = "K" ) OR
+     ( @size_unit IS NULL )
+  BEGIN
+    SELECT substring(t.tabname,1,15)                  "Table Name",
+           str(rowcnt(i.doampg),10)                   "Rows",
+           str((t.total_res_pgs * @pagekb),8) + " KB" "Reserved",
+           str((t.data_use_pgs * @pagekb),8) + " KB"  "Data",
+           str((t.ind_use_pgs * @pagekb),8) + " KB"   "Index",
+           str(((t.total_res_pgs -
+                (t.data_use_pgs + t.ind_use_pgs)) * 
+                 @pagekb),8) + " KB"                  "Unused"
+
+      FROM sysindexes i, #temp_info t
+      WHERE ( i.id  = t.id )         AND
+            ( ( i.indid  = 0 ) OR
+              ( i.indid  = 1 )    )
+  END
+  ELSE
+  BEGIN
+    SELECT substring(t.tabname,1,15)         "Table Name",
+           str(rowcnt(i.doampg),10)          "Rows",
+           str(t.total_res_pgs,8) + " Pgs"   "Reserved",
+           str(t.data_use_pgs,8) + " Pgs"    "Data",
+           str(t.ind_use_pgs,8) + " Pgs"     "Index",
+           str( (t.total_res_pgs -
+                (t.data_use_pgs + 
+                 t.ind_use_pgs)),8) + " Pgs" "Unused"
+    FROM sysindexes i, #temp_info t
+    WHERE  ( i.id  = t.id )         AND
+           ( ( i.indid  = 0 ) OR
+             ( i.indid  = 1 )    )
+  END
+END
+GO

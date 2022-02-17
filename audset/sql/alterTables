@@ -1,0 +1,94 @@
+CREATE TABLE eventsNew
+(
+        eventID         eventIdentifier                 IDENTITY
+                        CONSTRAINT eventsPrimaryKey PRIMARY KEY,
+        auditorium      auditoriumIdentifier            NOT NULL,
+        date            VpTime                          NOT NULL,
+        currentState    numeric(4,0)    DEFAULT 0       NOT NULL,
+        title           longName                        NOT NULL,
+        client          varchar(16)                     NULL,
+        rowSize         integer                         NOT NULL,
+        rowNamePrefix   varchar(10)     DEFAULT "Row "  NOT NULL,
+        welcomeImage    image                           NULL,
+        stageBackground longName                        NOT NULL
+)
+GO
+
+/* old structure:
+CREATE TABLE events
+(
+	eventID		eventIdentifier			IDENTITY
+                        constraint isPrimary primary key,
+	auditorium	auditoriumIdentifier		NOT NULL,
+	date        	VpTime				NOT NULL,
+	currentState	numeric(4,0)	DEFAULT 0	NOT NULL,
+	title		longName			NOT NULL,
+	client		varchar(16)			NULL,
+	rowSize		integer				NOT NULL,
+	rowNamePrefix	varchar(10)	DEFAULT "Row "	NOT NULL,
+	welcomeImage	image				NULL,
+	stageBackground	longName			NOT NULL,
+	interactBlocked	bit		DEFAULT 0	NOT NULL,
+	AolAuditorium	longName			NULL,
+	otherAuditorium	longName			NULL
+)
+*/
+SET identity_insert eventsNew on
+GO
+
+INSERT eventsNew
+  ( eventID, auditorium, date, currentState, title, client, 
+    rowSize, rowNamePrefix, welcomeImage, stageBackground   )
+  SELECT eventID, auditorium, date, currentState, title, client, 
+         rowSize, rowNamePrefix, welcomeImage, stageBackground
+    FROM events
+GO
+
+SET identity_insert eventsNew off
+GO
+
+EXEC sp_rename events, eventsOld
+GO
+EXEC sp_rename eventsNew, events
+GO
+DROP TABLE eventsOld
+GO
+
+CREATE TABLE interactionsAllowedNew
+(
+        eventID         numeric(10,0)                   NOT NULL,
+        interactionType numeric(2,0)                    NOT NULL,
+        name            varchar(16)                     NOT NULL,
+        interactBlocked bit             DEFAULT 0       NOT NULL,
+                PRIMARY KEY ( eventID, interactionType )
+)
+GO
+
+INSERT interactionsAllowedNew
+  SELECT eventID, interactionType, name, 0
+    FROM interactionsAllowed
+GO
+
+EXEC sp_rename interactionsAllowed, interactionsAllowedOld
+GO
+EXEC sp_rename interactionsAllowedNew, interactionsAllowed
+GO
+DROP TABLE interactionsAllowedOld
+GO
+
+DROP TABLE eventInteractions
+GO
+CREATE TABLE eventInteractions
+(
+	interactionID	numeric(10,0)			IDENTITY
+                        CONSTRAINT isPrimary PRIMARY KEY,
+	eventID		numeric(10,0)			NOT NULL,
+	interactionType	numeric(2,0)			NOT NULL,
+	time        	smalldatetime			NOT NULL,
+	senderName	VPuserID			NOT NULL,
+	text		varchar(255)			NULL,
+        status          numeric(2,0)                    NOT NULL,
+        category        varchar(16)                     NULL,
+        hostName        VPuserID			NULL
+)
+GO

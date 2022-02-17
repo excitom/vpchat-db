@@ -1,0 +1,8 @@
+CREATE PROC getPaypalInfo ( @ccID userIdentifier )
+AS
+BEGIN
+  SELECT email, first_name, last_name, payer_status, payer_id
+  FROM paypal
+  WHERE ccID = @ccID
+END
+GO

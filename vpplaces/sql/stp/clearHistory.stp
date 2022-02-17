@@ -1,0 +1,5 @@
+/* Clear from database all usage history records */
+CREATE PROC clearHistory
+AS
+  DELETE placeUsage
+GO

@@ -1,0 +1,11 @@
+/* Clear from database all records for all auditoriums */
+CREATE PROC clearAuditoriums
+AS
+BEGIN
+  
+  /* delete events and tables depending on events */
+  EXEC clearEvents
+
+  TRUNCATE TABLE auditoriums
+END
+GO

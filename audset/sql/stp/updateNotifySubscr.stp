@@ -1,0 +1,185 @@
+/*
+ * Update the status of a private list subscriber
+ *
+ * Input: List ID, userID, state (1 = approved, 0 = pending)
+ *
+ * Output: 0 = success
+ *         20000 = list not found
+ *         20001 = deleted list
+ *         20003 = user not found
+ */
+IF EXISTS(SELECT name FROM sysobjects WHERE name='updateNotifySubscr' AND type='P')
+ DROP PROC updateNotifySubscr
+GO
+CREATE PROC updateNotifySubscr ( 
+	@notifyID 	userIdentifier,
+	@userID 	userIdentifier,
+	@approved	int
+)
+AS
+BEGIN
+  DECLARE @lastError	int
+  DECLARE @deleted	bit
+  DECLARE @notifyPref	smallint
+  DECLARE @requestDate	VpTime
+  DECLARE @diffFromGMT	int
+  DECLARE @type       	int
+
+  BEGIN TRAN
+    IF EXISTS (SELECT * FROM notifyLists WHERE notifyID = @notifyID)
+    BEGIN
+      SELECT @deleted = deleted, @type = type
+      FROM notifyLists
+      WHERE notifyID = @notifyID
+
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+
+      IF @deleted = 1
+      BEGIN
+        ROLLBACK TRAN
+        RETURN 20001
+      END
+    END
+    ELSE BEGIN
+      ROLLBACK TRAN
+      RETURN 20000
+    END
+
+    IF @approved = 1
+    BEGIN
+      SELECT @notifyPref = notifyPref
+        FROM pendingListSubscrs
+        WHERE notifyID = @notifyID
+        AND userID = @userID
+
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+
+      IF @notifyPref IS NOT NULL
+      BEGIN
+        DELETE pendingListSubscrs
+          WHERE notifyID = @notifyID
+          AND userID = @userID
+
+        SELECT @lastError = @@error
+        IF @lastError != 0
+        BEGIN
+          ROLLBACK TRAN
+          RETURN @lastError
+        END
+
+        INSERT notifySubscrs
+          (notifyID, userID, notifyPref)
+          VALUES (@notifyID, @userID, @notifyPref)
+
+        SELECT @lastError = @@error
+        IF @lastError != 0
+        BEGIN
+          ROLLBACK TRAN
+          RETURN @lastError
+        END
+
+        IF @type & 256 > 0	-- game ladder?
+        BEGIN
+          UPDATE ladderMembers 
+	    SET pending = 0
+	    WHERE notifyID = @notifyID
+	    AND userID = @userID
+
+          SELECT @lastError = @@error
+          IF @lastError != 0
+          BEGIN
+            ROLLBACK TRAN
+            RETURN @lastError
+          END
+        END
+      END
+      ELSE BEGIN
+        ROLLBACK TRAN
+        RETURN 20003
+      END
+    END
+    ELSE BEGIN
+      SELECT @notifyPref = notifyPref
+        FROM notifySubscrs
+        WHERE notifyID = @notifyID
+        AND userID = @userID
+
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+
+      IF @notifyPref IS NOT NULL
+      BEGIN
+        DELETE notifySubscrs
+          WHERE notifyID = @notifyID
+          AND userID = @userID
+
+        SELECT @lastError = @@error
+        IF @lastError != 0
+        BEGIN
+          ROLLBACK TRAN
+          RETURN @lastError
+        END
+
+        SELECT @diffFromGMT = gmt
+          FROM vpusers..getGMT
+        IF @diffFromGMT IS NULL
+          SELECT @diffFromGMT = 0
+    
+        SELECT @lastError = @@error
+        IF @lastError != 0
+        BEGIN
+          ROLLBACK TRAN
+          RETURN @lastError
+        END
+
+        SELECT @requestDate = dateadd( hour, (-1) * @diffFromGMT, getdate() )
+
+        INSERT pendingListSubscrs
+          (notifyID, userID, notifyPref, requestDate)
+          VALUES (@notifyID, @userID, @notifyPref, @requestDate)
+
+        SELECT @lastError = @@error
+        IF @lastError != 0
+        BEGIN
+          ROLLBACK TRAN
+          RETURN @lastError
+        END
+
+        IF @type & 256 > 0	-- game ladder?
+        BEGIN
+          UPDATE ladderMembers 
+	    SET pending = 1
+	    WHERE notifyID = @notifyID
+	    AND userID = @userID
+
+          SELECT @lastError = @@error
+          IF @lastError != 0
+          BEGIN
+            ROLLBACK TRAN
+            RETURN @lastError
+          END
+        END
+      END
+      ELSE BEGIN
+        ROLLBACK TRAN
+        RETURN 20003
+      END
+    END
+
+  COMMIT TRAN
+END
+GO

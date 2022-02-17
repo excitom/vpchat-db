@@ -1,0 +1,17 @@
+/* --- forgive an active penalty --- */
+/* this is an interface for calling from an HTML GUI */
+CREATE PROC forgivePenalty
+( 
+  @penaltyID integer
+)
+AS
+BEGIN
+  BEGIN TRAN
+
+  UPDATE penalties
+    SET forgiven = 1
+    WHERE penaltyID = @penaltyID
+
+  COMMIT TRAN
+END
+GO 

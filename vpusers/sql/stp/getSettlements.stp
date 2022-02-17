@@ -1,0 +1,46 @@
+/* 
+ * Find pending transaction settlements.
+ */
+CREATE PROC getSettlements (
+  @readOnly	bit=0
+)
+AS
+BEGIN
+  DECLARE @lastError int
+
+  BEGIN TRAN
+    
+    IF NOT EXISTS (SELECT * FROM settlements)
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20000
+    END
+
+    SELECT settlementID, s.invoice, orderID, type, ccID, accountID, amount, AVS_result, approvalCode
+      FROM settlements s, transactions t
+      WHERE s.invoice = t.invoice
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    IF @readOnly = 0
+    BEGIN
+      DELETE FROM settlements
+
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+    END
+
+  COMMIT TRAN
+
+  RETURN 0
+END
+GO

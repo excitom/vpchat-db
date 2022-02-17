@@ -1,0 +1,55 @@
+/* updates a places type in the database */
+/* input:  place type, 
+           min people for showing places, sort order,
+           unify replicates, exclude shadow places
+   output: return value is 20001 if place type does not exist,
+           0 otherwise
+*/
+CREATE PROC updPlaceType
+(
+  @placeType    integer,
+  @minPeople    integer,
+  @sortOrder    integer,
+  @unifyReplicated  bit,
+  @excludeShadow    bit
+)
+AS
+BEGIN
+  
+  DECLARE @lastError            int
+
+  BEGIN TRAN
+    
+    SELECT type 
+      FROM placeTypes
+      WHERE type = @placeType
+    IF @@rowCount = 0
+    BEGIN
+      /* node not found */
+      ROLLBACK TRAN
+      RETURN 20001
+    END
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+   
+    UPDATE placeTypes
+    SET minPeople = @minPeople, sortOrder = @sortOrder,
+        unifyReplicates = @unifyReplicated, excludeShadow = @excludeShadow
+    WHERE type = @placeType
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+    
+  COMMIT TRAN
+
+END
+GO

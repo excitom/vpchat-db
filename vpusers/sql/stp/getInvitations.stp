@@ -1,0 +1,24 @@
+/*
+ * Find information about invitations sent by an
+ * account holder.
+ *
+ */
+CREATE PROC getInvitations (@accountID userIdentifier)
+AS
+BEGIN
+
+  SELECT email, inviteDate, NULL AS creationDate, NULL AS nickName, -1 AS accountStatus
+    FROM invitations
+    WHERE referredByID = @accountID
+    AND   accountID IS NULL
+
+  UNION
+
+  SELECT invitations.email, inviteDate, creationDate, nickName, accountStatus
+    FROM invitations, userAccounts, users
+    WHERE invitations.referredByID = @accountID
+    AND   invitations.accountID = userAccounts.accountID
+    AND   userAccounts.ownerID = users.userID
+    
+END
+GO

@@ -1,0 +1,589 @@
+/* update a user account record to reflect a payment */
+/* input:  account ID, amount, transaction ID
+
+   This is a version of addPayment customized for the
+   PayPal IPN process.
+
+   paymentStatus:
+	0 = OK
+	1 = unconfirmed
+	2 = failed
+	3 = waiting for check
+   accountStatus:
+	0 = OK
+	1 = new
+	2 = pending
+	3 = closed
+	4 = suspended - penalty
+	5 = suspended - expired
+
+   output: Return value - 0 - success 
+			  success, and balance is zero or credit
+			  1 - account was new 
+			  2 - account was pending 
+			  3 - account was expired
+			  100 - pending echeck
+			  101 - pending echeck, new acct
+			  102 - free trial (not used)
+			  103 - pending echeck, expired account
+			  200 - echeck cleared
+			  201 - echeck denied
+			  300 - payment reversal
+			  warnings
+			  10000 - balance still due
+			  errors
+                          20001 - No such account existed in database
+                          20002 - Duplicate payment
+			  20003 - account suspended or closed
+			  20004 - bad credit
+*/
+CREATE PROC addPaymentIPN ( @accountID userIdentifier, @amount smallmoney, @transactionID varchar(255), @ccID userIdentifier, @echeck tinyint = 0 )
+AS
+BEGIN
+  DECLARE @aid userIdentifier
+  DECLARE @paymentID userIdentifier
+  DECLARE @lastError int
+  DECLARE @diffFromGMT int
+  DECLARE @paymentDate VpTime
+  DECLARE @renewalDate VpTime
+  DECLARE @subscription smallmoney
+  DECLARE @accountStatus tinyint
+  DECLARE @billingCycle tinyint
+  DECLARE @returnCode int
+  DECLARE @newStatus tinyint
+  DECLARE @updateRequired bit
+  DECLARE @bal smallmoney
+
+  SELECT @updateRequired = 0	-- default: no need to update account status
+  SELECT @newStatus = 0
+
+  SELECT @returnCode = 0
+  
+  SELECT @paymentDate = getdate()
+
+  BEGIN TRAN
+    
+    SELECT @diffFromGMT = gmt
+      FROM getGMT
+    IF @diffFromGMT IS NULL
+      SELECT @diffFromGMT = 0
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN @lastError
+    END
+
+    SELECT @paymentDate = dateadd( hour, (-1) * @diffFromGMT, @paymentDate )
+
+    SELECT @aid = accountID,
+           @accountStatus = accountStatus,
+           @renewalDate = renewalDate,
+           @billingCycle = billingCycle
+      FROM userAccounts
+      WHERE accountID = @accountID
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    IF @accountID != @aid
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20001
+    END
+
+    /* suspended or closed account */
+    IF @accountStatus = 3 OR @accountStatus = 4
+    BEGIN
+      /* allow if reversing a payment */
+      IF @amount > 0 
+      BEGIN
+        ROLLBACK TRAN
+        RETURN 20003
+      END
+    END
+
+    /* check for duplicate payment */
+    SELECT @paymentID = paymentID
+      FROM payments
+      WHERE ltrim(comment) = ltrim(@transactionID)
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    IF @paymentID IS NOT NULL
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20002
+    END
+
+    /*
+     * payer in the bad credit list ?
+     */
+    IF EXISTS (
+      SELECT * FROM badCredit WHERE ccID = @ccID AND type = 1
+    )
+    BEGIN
+      /* allow if reversing a payment */
+      IF @amount > 0 
+      BEGIN
+        ROLLBACK TRAN
+        RETURN 20004
+      END
+    END
+
+    /*
+     * Echeck parameter:
+     * 0 = not an echeck
+     * 1 = Pending echeck
+     * 2 = Cleared echeck
+     * 3 = Denied echeck
+     */
+    IF @echeck = 1
+    BEGIN
+
+      /* check for duplicate payment */
+      SELECT @paymentID = paymentID
+        FROM heldPayments
+        WHERE ltrim(comment) = ltrim(@transactionID)
+    
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+
+      IF @paymentID IS NOT NULL
+      BEGIN
+        ROLLBACK TRAN
+        RETURN 20002
+      END
+
+      DECLARE @pmtStatus int
+      SELECT @pmtStatus = 4
+
+      UPDATE userAccounts
+        SET paymentStatus = @pmtStatus
+        WHERE accountID = @accountID
+
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+
+      /*
+       * The heldPayments table was originally designed for echecks,
+       * which have a lot more fields than PayPal pmts. We need to
+       * fill in some dummy values.
+       */
+
+      INSERT INTO heldPayments (accountID, paymentDate, amount, AVS_result, shopperID, orderID, approvalCode, status, comment, pmtType, ccID)
+        VALUES (@accountID, @paymentDate, @amount, "9", "", "", "", 0, @transactionID, 1, 0)
+
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+        
+      COMMIT TRAN
+
+      IF @accountStatus = 1
+      BEGIN
+        SELECT @returnCode = 101
+      END
+      ELSE BEGIN
+        IF @accountStatus = 5
+        BEGIN
+          SELECT @returnCode = 103
+        END
+        ELSE BEGIN
+          SELECT @returnCode = 100
+        END
+      END
+      RETURN @returnCode
+    END
+
+    /*
+     * Echeck, status = Denied
+     */
+    IF @echeck = 3
+    BEGIN
+      SELECT @paymentID = paymentID
+        FROM heldPayments
+        WHERE ltrim(comment) = ltrim(@transactionID)
+    
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+
+      IF @paymentID IS NULL
+      BEGIN
+        ROLLBACK TRAN
+        RETURN 20001
+      END
+
+      UPDATE heldPayments
+        SET status = 2
+        WHERE paymentID = @paymentID
+
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+
+      UPDATE renewals
+        SET badChecks = badChecks + 1
+        WHERE accountID = @accountID
+
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+
+      COMMIT TRAN
+
+      SELECT @bal = subscription
+        FROM accountBalance
+        WHERE accountID = @accountID
+
+      IF @bal > 0
+      BEGIN
+        EXEC updateAccountStatus @accountID, 5
+
+        UPDATE userAccounts
+          SET paymentStatus = 3
+          WHERE accountID = @accountID
+      END
+
+      RETURN 201
+    END
+
+    /*
+     * Echeck, status = Cleared
+     */
+    IF @echeck = 2
+    BEGIN
+      SELECT @paymentID = paymentID
+        FROM heldPayments
+        WHERE ltrim(comment) = ltrim(@transactionID)
+    
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+
+      IF @paymentID IS NULL
+      BEGIN
+        ROLLBACK TRAN
+        RETURN 20001
+      END
+
+      UPDATE heldPayments
+        SET status = 1
+        WHERE paymentID = @paymentID
+
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+
+      SELECT @returnCode = 200
+    END
+
+    /*
+     * Insert a payment record
+     */
+    INSERT INTO payments (accountID, paymentDate, amount, comment)
+      VALUES (@accountID, @paymentDate, @amount, @transactionID)
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+        
+    /* get the unique payment ID */
+    SELECT @paymentID = @@identity
+
+    UPDATE accountBalance
+      SET subscription = subscription - @amount
+      WHERE accountID = @accountID
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    SELECT @subscription = subscription
+      FROM accountBalance
+      WHERE accountID = @accountID
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    /*
+     * Add details (the ccPayments table was originally for credit
+     * card payments, but we've started saving more stuff relating 
+     * to PayPal payments)
+     */
+    INSERT ccPayments (paymentID, pmtType, AVS_result, shopperID, orderID, approvalCode)
+      VALUES (@paymentID, 1, '', '', '', '')
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    /*
+     * Update the running balance
+     */
+    SELECT @bal = 0 - @subscription
+    INSERT runningBalance (paymentID, balance) VALUES (@paymentID, @bal)
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    /* if this payment is enough to clear the balance, set status OK */
+    IF ROUND(@subscription,2) <= 0
+    BEGIN
+      UPDATE userAccounts
+        SET paymentStatus = 0
+        WHERE accountID = @accountID
+
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+
+      /* if account was suspended for non-payment, but payment 
+         was received, set accountStatus to OK
+
+         also update account status is account was new or pending
+      */
+      SELECT @newStatus = @accountStatus	-- default = same
+      SELECT @updateRequired = 1
+      IF @accountStatus = 5 OR @accountStatus = 1 OR @accountStatus = 2
+      BEGIN
+        SELECT @newStatus = 0
+
+        IF @accountStatus = 5
+        BEGIN
+          SELECT @returnCode = 3
+        END
+        ELSE
+        BEGIN
+          IF @accountStatus = 1
+          BEGIN
+            SELECT @returnCode = 1
+          END
+          ELSE
+          BEGIN
+            SELECT @returnCode = 2
+          END
+        END
+
+        /* 
+           Update the renewal date if
+           - Renewal date is past
+           - Account balance 0 or credit
+           - Account was New,Pending, or Overdue
+           OR
+           - Account balance 0 or credit
+           - Account was New
+
+           In the latter case, the new renewal date is adjusted forward the
+                number of days between the registration date and today.
+
+	   Another complication: PayPal's calculation of the subscription
+	   length does not exactly match ours, so our views of the renewal
+	   date diverge over time. If this is a payment on an auto-renewing
+	   subscription, then set the renewal date to sync with the payment
+	   from PayPal.
+           
+        */
+        IF @paymentDate >= @renewalDate
+        BEGIN
+          /*
+           * If Pending, then person has been using the account in the interim
+           * so the new renewal date = renewal date + billing cycle.
+           *
+           * - except if this is an auto-renew subscription (see note above)
+           */
+          IF @accountStatus = 2
+          BEGIN
+            IF EXISTS (SELECT * FROM subscriptions
+                         WHERE accountID = @accountID
+                         AND   type = 1
+                         AND   autoRenew = 1)
+            BEGIN
+              SELECT @renewalDate = dateadd( month, @billingCycle, @paymentDate )
+            END
+            ELSE BEGIN
+              SELECT @renewalDate = dateadd( month, @billingCycle, @renewalDate )
+            END
+          END
+          /*
+           * If New or Overdue, then person has NOT been using the account
+           * in the interim since the renewal date passed, so set new
+           * renewal date = today + billing cycle.
+           */
+          ELSE BEGIN
+            SELECT @renewalDate = dateadd( month, @billingCycle, @paymentDate )
+          END
+          UPDATE userAccounts
+            SET renewalDate = @renewalDate
+            WHERE accountID = @accountID
+
+          SELECT @lastError = @@error
+          IF @lastError != 0
+          BEGIN
+            ROLLBACK TRAN
+            RETURN @lastError
+          END
+
+          /*
+           * Since this payment has renewed a subscription, update the stats
+           */
+          UPDATE renewals
+            SET months = months + @billingCycle,
+                renewals = renewals + 1
+            WHERE accountID = @accountID
+
+          SELECT @lastError = @@error
+          IF @lastError != 0
+          BEGIN
+            ROLLBACK TRAN
+            RETURN @lastError
+          END
+        END /* end, past renewal date */
+        ELSE
+        BEGIN
+          /*
+           * Not past renewal date, but new account. Adjust the renewal date
+           * ahead based on days past registration date. Why not just add the
+           * billing cycle to today's date? Because of promos that give 
+           * extra time for the first billing period.
+           */
+          IF @accountStatus = 1
+          BEGIN
+            DECLARE @delta int
+            DECLARE @creationDate VpTime
+            SELECT @creationDate = creationDate
+              FROM userAccounts
+              WHERE accountID = @accountID
+
+            SELECT @lastError = @@error
+            IF @lastError != 0
+            BEGIN
+              ROLLBACK TRAN
+              RETURN @lastError
+            END
+
+            SELECT @delta = DATEDIFF (day, @creationDate, @paymentDate)
+            SELECT @renewalDate = dateadd( day, @delta, @renewalDate )
+            UPDATE userAccounts
+              SET renewalDate = @renewalDate
+              WHERE accountID = @accountID
+
+            SELECT @lastError = @@error
+            IF @lastError != 0
+            BEGIN
+              ROLLBACK TRAN
+              RETURN @lastError
+            END
+          END /* end, NEW account */
+
+          /*
+           * If this is a first time payment, initialize
+           * the stats with the term of the subscr.
+           */
+          UPDATE renewals
+            SET months = @billingCycle
+            WHERE accountID = @accountID
+            AND months = 0
+
+          SELECT @lastError = @@error
+          IF @lastError != 0
+          BEGIN
+            ROLLBACK TRAN
+            RETURN @lastError
+          END
+        END /* end, NOT past renewal date */
+      END /* end, new, pending, or expired */
+    END /* end, balance 0 or credit */
+    /* balance owed */
+    ELSE
+    BEGIN
+
+      /*
+       * if payment reversal, balance now negative,
+       * and account was OK or pending, set it to expired
+       */
+      IF @amount < 0
+      BEGIN
+        SELECT @updateRequired = 1
+        SELECT @newStatus = 5
+      END
+      ELSE BEGIN
+        SELECT @returnCode = 10000
+      END
+    END
+
+  COMMIT TRAN
+
+  IF @updateRequired = 1
+  BEGIN
+    EXEC updateAccountStatus @accountID, @newStatus
+  END
+
+  /*
+   * special case: payment reversal - always return 300
+   */
+  IF @amount < 0
+  BEGIN
+    SELECT @returnCode = 300
+  END
+
+  RETURN @returnCode
+END
+GO

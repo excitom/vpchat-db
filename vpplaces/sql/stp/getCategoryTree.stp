@@ -1,0 +1,160 @@
+EXEC createTreeTable
+GO
+CREATE PROC getCategoryTree
+/*  Get the category subTree from a given category */
+/*
+INPUT  : category id or NULL for the root category
+OUTPUT : the category subTree in the form of a table listing 
+         the following fields (when applicable):
+	 treeLevel, 
+         node type (C = category, P = persistent or cool place, 
+                    A = auditorium, R = regular place), 
+         category Id, 
+         name (category name or URL), 
+         protected Flag, 
+         title, 
+         capacity,
+	 auditorium Name, 
+         auditorium Id, 
+         auditorium client, 
+         auditorium welcomeMsg1, 
+         auditorium welcomeMsg2, 
+         rowSize, 
+         numRows
+*/
+(
+@categoryId categoryIdentifier = NULL, 
+@level int = 1
+)
+as
+BEGIN
+DECLARE @subCategory	categoryIdentifier 
+DECLARE @name 		varchar(30)
+DECLARE @subLevel 	integer
+DECLARE @URL 		varchar(255)
+DECLARE @type 		integer
+DECLARE @title 		varchar(255)
+DECLARE @capacity 	integer
+DECLARE @protected 	bit
+DECLARE @vptype 	integer
+DECLARE @audName 	varchar(16)
+DECLARE @audId          numeric(10,0)
+DECLARE @client 	varchar(16)
+DECLARE @welc1 		varchar(255) 
+DECLARE @welc2 		varchar(255)
+DECLARE @rowSize	integer
+DECLARE @numRows	integer
+
+SELECT @subLevel = @level + 1
+
+IF (@level = 1)
+  DELETE tempdb..TreeTable
+
+/* Get subcategories and process them */
+DECLARE categCursor CURSOR
+  FOR SELECT category, description
+    FROM vpplaces..categories
+    WHERE ( parentCategeory = @categoryId )
+  FOR READ ONLY
+
+OPEN categCursor
+FETCH categCursor INTO @subCategory, @name
+WHILE (@@SQLSTATUS = 0)
+BEGIN
+    INSERT tempdb..TreeTable
+      VALUES(@level, "C", @subCategory, @name, 0, NULL, NULL, NULL, NULL, NULL, NULL,
+             NULL, NULL, NULL, NULL) 
+    EXEC getCategoryTree @subCategory, @subLevel
+    FETCH categCursor INTO @subCategory, @name
+END
+
+CLOSE categCursor
+
+/* Get category Places with all the information about them */
+/* Get list of places in temporary table */
+CREATE TABLE #categPlaces (URL varchar(255), type integer)
+
+IF @categoryId = NULL
+BEGIN
+  INSERT #categPlaces
+    SELECT URL,0 
+      FROM persistentPlaces 
+      WHERE URL NOT IN (SELECT URL FROM placeCategories)
+
+  UPDATE #categPlaces
+    SET type = 1
+    WHERE URL IN (SELECT URL FROM persistentPlaces WHERE type = 2049)
+END
+ELSE
+BEGIN
+  INSERT #categPlaces
+    SELECT URL, 2
+      FROM vpplaces..placeCategories
+      WHERE ( category = @categoryId )
+
+  UPDATE #categPlaces
+    SET type = 0
+    WHERE URL IN (SELECT URL FROM vpplaces..persistentPlaces WHERE type != 2049)
+
+  UPDATE #categPlaces
+    SET type = 1
+    WHERE URL IN (SELECT URL FROM vpplaces..persistentPlaces WHERE type = 2049)
+END
+
+/* Process each place according to its type */
+IF @categoryId = NULL
+  SELECT @categoryId = 0
+
+DECLARE placesCursor CURSOR
+  FOR SELECT * 
+    FROM #categPlaces
+  FOR READ ONLY
+
+OPEN placesCursor
+FETCH placesCursor INTO @URL, @type
+WHILE (@@SQLSTATUS = 0)
+BEGIN
+    IF @type = 0           /* Cool Place */
+    BEGIN
+      SELECT @title = title, @capacity = roomCapacity, @protected = roomProtected, @vptype = type
+        FROM vpplaces..persistentPlaces
+        WHERE URL = @URL
+      INSERT tempdb..TreeTable
+        VALUES(@level, "P", @categoryId, @URL, @protected, @vptype, @title, @capacity, NULL, NULL, NULL,
+             NULL, NULL, NULL, NULL) 
+    END
+    ELSE 
+    IF @type = 1           /* Auditorium */
+    BEGIN
+      SELECT @audName = name, @audId = auditoriumID, @client = client, @title = title, @capacity = stageCapacity, 
+             @welc1 = welcomeMsg1, @welc2 = welcomeMsg2, @rowSize = rowSize, 
+             @numRows = numberOfRows
+        FROM audset..auditoriums
+        WHERE background = @URL
+      IF (@welc2 = NULL)	/* This should be the only field that could be NULL */
+        SELECT @welc2 = " " 	
+      INSERT tempdb..TreeTable
+        VALUES(@level, "A", @categoryId, @URL, 1, NULL, @title, @capacity, @audName, @audId, @client,
+             @welc1, @welc2, @rowSize, @numRows) 
+    END
+    ELSE                        /* Regular place */
+      INSERT tempdb..TreeTable
+        VALUES(@level, "R", @categoryId, @URL, 0, NULL, NULL, NULL, NULL, NULL, NULL,
+             NULL, NULL, NULL, NULL)     
+    FETCH placesCursor INTO @URL, @type    
+END
+
+CLOSE placesCursor
+
+DROP TABLE #categPlaces
+
+IF (@level = 1)
+BEGIN
+  SELECT * 
+    FROM tempdb..TreeTable
+
+  DROP TABLE tempdb..TreeTable
+END
+
+END
+GO

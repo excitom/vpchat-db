@@ -1,0 +1,10 @@
+CREATE TABLE placeTypes
+(
+	type	            integer	                NOT NULL
+                                    constraint isPrimary primary key,
+	minPeople           integer    DEFAULT 1        NOT NULL, 
+	sortOrder           integer    DEFAULT 1        NOT NULL,
+	unifyReplicates	    bit	       DEFAULT 1        NOT NULL,
+	excludeShadow       bit	       DEFAULT 0        NOT NULL
+)
+GO

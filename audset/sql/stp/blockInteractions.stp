@@ -1,0 +1,103 @@
+/* --- Block/UnBlock all interactions
+       for a given event and interaction type,
+*/
+/* input:  event id, interactionTypes, block flag (1= block, 0=unblock)
+   output: error 20001 if too many interaction types are given.
+*/
+CREATE PROC blockInteractions
+(
+  @eventID		numeric(10,0),
+  @interactionTypes	longName,
+  @blockFlag		bit
+)
+AS
+BEGIN
+/* Get Interaction Types requested ... */
+/* ------------------------------------*/
+DECLARE @iType    integer
+DECLARE @iType1   integer
+DECLARE @iType2   integer 
+DECLARE @iType3   integer 
+DECLARE @iType4   integer 
+DECLARE @iType5   integer 
+DECLARE @iType6   integer 
+DECLARE @counter  integer
+DECLARE @commaPos integer
+DECLARE @IName    varchar(16)
+DECLARE @lastError integer
+
+/* Parse list of interaction types */
+/* --------------------------------*/
+SELECT @counter = 1
+WHILE ( ascii( rtrim(ltrim(@interactionTypes))) > 32 )
+BEGIN
+  SELECT @commaPos = patindex( "%,%", @interactionTypes )
+  IF @commaPos = 0 BEGIN
+    /* Last Interaction Type in list */
+    SELECT @IName = rtrim(ltrim(@interactionTypes))
+    SELECT @interactionTypes = ""
+  END
+  ELSE BEGIN
+    SELECT @IName = rtrim( ltrim( substring( @interactionTypes, 1, @commaPos-1)) )
+    SELECT @interactionTypes = substring( @interactionTypes, 
+                                          @commaPos+1, 
+                                          char_length( @interactionTypes ) - @commaPos )
+  END
+
+  /* Get the Interaction Type for the current Interaction Name */
+  SELECT @iType = interactionType
+  FROM interactionsAllowed
+  WHERE eventID = @eventID AND 
+        name = @IName
+  SELECT @lastError = @@error
+  IF @lastError != 0
+  BEGIN
+    RAISERROR @lastError
+    RETURN @lastError
+  END
+  
+  IF @counter = 1 
+     SELECT @iType1 = @iType
+  ELSE IF @counter = 2 
+     SELECT @iType2 = @iType
+  ELSE IF @counter = 3 
+     SELECT @iType3 = @iType
+  ELSE IF @counter = 4 
+     SELECT @iType4 = @iType
+  ELSE IF @counter = 5 
+     SELECT @iType5 = @iType
+  ELSE IF @counter = 6 
+     SELECT @iType6 = @iType
+  ELSE 
+    RETURN 20001 /* Too many Interaction Types */
+
+  SELECT @counter = @counter + 1
+
+END /* of while */
+
+/* Set zero in unused iTypes variables */
+WHILE @counter <= 6
+BEGIN
+  IF @counter = 1 
+     SELECT @iType1 = 0
+   ELSE IF @counter = 2 
+     SELECT @iType2 = 0
+  ELSE IF @counter = 3 
+     SELECT @iType3 = 0
+  ELSE IF @counter = 4 
+     SELECT @iType4 = 0
+  ELSE IF @counter = 5 
+     SELECT @iType5 = 0
+  ELSE IF @counter = 6 
+     SELECT @iType6 = 0
+  SELECT @counter = @counter + 1
+END
+
+/* Now block/unblock appropriate interactions */
+  UPDATE interactionsAllowed
+    SET interactBlocked = @blockFlag
+    WHERE eventID = @eventID AND
+        interactionType IN(@iType1, @iType2, @iType3, @iType4, @iType5, @iType6)
+ 
+END
+GO 

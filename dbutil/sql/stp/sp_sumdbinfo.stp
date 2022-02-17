@@ -1,0 +1,78 @@
+USE sybsystemprocs
+GO
+CREATE PROCEDURE sp_sumdbinfo
+(
+  @s1 varchar(30) = NULL,
+  @s2 char(1)     = NULL
+)
+AS
+BEGIN
+  DECLARE @pagekb    int
+  DECLARE @dbname    varchar(30)
+  DECLARE @size_unit char(1)
+  
+  IF ( @s1 LIKE  "[kKmM]" )
+  BEGIN
+    SELECT @size_unit = @s1
+    SELECT @dbname    = NULL
+  END
+  ELSE
+  BEGIN
+    SELECT @dbname    = @s1
+    SELECT @size_unit = @s2
+  END
+  SELECT @size_unit = upper(@size_unit)
+  
+  SELECT @pagekb = low/1024
+    FROM master..spt_values
+    WHERE ( number = 1 ) AND
+          ( type = "E" )
+  
+  IF @dbname IS NULL
+   SELECT @dbname = "*"
+  
+  SELECT @size_unit = upper(@size_unit)
+  
+  SELECT dbname      = d.name,
+         ksize       = sum(@pagekb * u.size),
+         free_kbytes = sum(curunreservedpgs(u.dbid,u.lstart,u.unreservedpgs) * @pagekb)
+  INTO #temp_info
+    FROM master..sysdatabases d,
+         master..sysusages    u,
+         master..sysdevices   v,
+         master..spt_values   b,
+         master..sysmessages  m
+    WHERE ( d.dbid       = u.dbid )          AND
+      ( v.low       <= u.size + vstart )     AND
+      ( v.high      >= u.size + vstart - 1 ) AND
+      ( v.status & 2 = 2 )                   AND
+      ( (d.name = @dbname) OR 
+        ( @dbname = '*' )  OR
+        ( @dbname IS NULL )   )              AND
+      ( b.type       = "S" )		     AND
+      ( u.segmap & 7 = b.number )	     AND
+      ( b.msgnum     = m.error )	     AND
+      ( isnull(m.langid,0) = @@langid )
+  GROUP BY d.name
+  
+  IF ( @size_unit = "M" ) OR
+     ( @size_unit IS NULL )
+  BEGIN
+    SELECT convert(varchar(10),dbname)                                     "Dbname",
+           str((ksize/1024.0),5,1) + " MB"                                 "Size",
+           str(((ksize-free_kbytes)/1024.0),5,1) + " MB"                   "Occupied",
+           str(((ksize - free_kbytes)/convert(float,ksize)*100),5,1) + "%" "Pct."
+    FROM #temp_info
+    ORDER BY dbname
+  END
+  ELSE
+  BEGIN
+    SELECT convert(varchar(10),dbname)                                     "Dbname",
+           str(ksize,8) + " KB"                                            "Size",
+           str((ksize-free_kbytes),8) + " KB"                              "Occupied",
+           str(((ksize - free_kbytes)/convert(float,ksize)*100),5,1) + "%" "Pct."
+    FROM #temp_info
+    ORDER BY dbname
+  END
+END
+GO

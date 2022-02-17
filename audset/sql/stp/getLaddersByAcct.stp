@@ -1,0 +1,24 @@
+/*
+ * Return a list of the game ladders owned by an account
+ *
+ */
+CREATE PROC getLaddersByAcct (
+	@accountID	userIdentifier
+)
+AS
+BEGIN
+  SELECT n.notifyID, ladderName, s.unitCost, description, gameName,
+      subheader, URL, imageURL, unlisted, approvalRqd, adultContent, closed,
+      createdDate
+    FROM notifyLists n, vpusers..userAccounts a, 
+         vpusers..services s, privateLists p, ladders l, gameTypes g
+    WHERE a.accountID = @accountID
+    AND   a.accountID = s.accountID
+    AND   s.itemID = n.notifyID
+    AND   s.itemID = p.notifyID
+    AND   s.itemID = l.notifyID
+    AND   s.type = 6
+    AND   l.gameTypeID = g.gameTypeID
+    ORDER BY description ASC
+END
+GO

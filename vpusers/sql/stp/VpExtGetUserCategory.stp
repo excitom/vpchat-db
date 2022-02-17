@@ -1,0 +1,10 @@
+/* check user catgeory
+   INPUT  : email address
+   OUTPUT : string representing the category of that user by the user's details
+*/
+CREATE PROC VpExtGetUserCategory ( @email longName )
+AS
+BEGIN
+  SELECT category = "!"
+END
+GO 

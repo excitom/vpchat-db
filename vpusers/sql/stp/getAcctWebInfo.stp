@@ -1,0 +1,106 @@
+/*
+ * Get information about all the home pages associated with an account.
+ *
+ * Input: accountID
+ * Output: 0 = success
+ *         20001 = unknown account
+ * If success, one row of output per user name, prefixed by a 'U',
+ *   then summary information about the account, prefixed by an 'A'.
+ *
+ */
+IF EXISTS(SELECT name FROM sysobjects WHERE name='getAcctWebInfo' AND type='P')
+ DROP PROC getAcctWebInfo
+GO
+CREATE PROC getAcctWebInfo ( @accountID userIdentifier )
+AS
+BEGIN
+  IF NOT EXISTS (
+    SELECT * FROM userAccounts WHERE accountID = @accountID
+  )
+  BEGIN
+    RETURN 20001
+  END
+
+  DECLARE @lastError int
+
+  BEGIN TRAN
+    SELECT 'U', URL, maxSpace, maxTransfer, megsTransferred, bytesTransferred, webHits, pageViews, bytesUsed, statsDate, locked
+      FROM  vpplaces..homePages, registration 
+      WHERE accountID = @accountID
+      AND   deleted = 0
+      AND   registration.userID = vpplaces..homePages.userID
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN @lastError
+    END
+
+    DECLARE @pages int
+    SELECT @pages = COUNT(URL)
+      FROM  vpplaces..homePages, registration 
+      WHERE accountID = @accountID
+      AND   deleted = 0
+      AND   registration.userID = vpplaces..homePages.userID
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN @lastError
+    END
+
+    DECLARE @webPageSpace int
+    SELECT @webPageSpace = intValue
+      FROM configurationKeys
+      WHERE belongsTo=340 AND type=1 AND keyName='webPageSpace'
+
+    DECLARE @webPageXfer  int
+    SELECT @webPageXfer = intValue
+      FROM configurationKeys
+      WHERE belongsTo=340 AND type=1 AND keyName='webPageXfer'
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN @lastError
+    END
+
+    DECLARE @nameLimit int
+    SELECT @nameLimit = nameLimit
+      FROM userAccounts
+      WHERE accountID = @accountID
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN @lastError
+    END
+
+    /*
+     * Sometimes nameLimit is set to zero as an administrative penalty (to
+     * prevent adding more names to the account). In this case, set the
+     * name limit to equal the current names in use, such that all existing
+     * names can have web pages.
+     */
+    IF @nameLimit = 0
+    BEGIN
+      SELECT @nameLimit = COUNT(userID)
+        FROM registration
+        WHERE accountID = @accountID
+    END
+
+    DECLARE @maxSpace int
+    SELECT @maxSpace = @webPageSpace * @nameLimit
+
+    DECLARE @maxXfer int
+    SELECT @maxXfer = @webPageXfer * @nameLimit
+
+    SELECT 'A', @pages, @nameLimit, @maxSpace, @maxXfer, @webPageSpace, @webPageXfer
+  COMMIT TRAN
+  RETURN 0
+END
+GO 

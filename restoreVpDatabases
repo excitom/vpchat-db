@@ -1,0 +1,72 @@
+#!/bin/sh
+
+# This script does the restoration of VpDatabases from full backup
+# NOTE: it is assumed that the VP databases do not exist when this
+# script is run
+
+if [ $# -lt 7 ]
+then
+  echo "usage: restoreVpDatabases <ServicesRoot> <SybaseRoot> <DBAdminLogin> <DBAdminPasswd> <DataServer>"
+  echo "                          <databaseSize> <logSize>"
+  exit
+fi
+
+ServicesRoot=$1
+shift
+SybaseRoot=$1
+shift
+DBAdminLogin=$1
+shift
+DBAdminPasswd=$1
+shift
+dataServer=$1
+shift
+databaseSize=$1
+shift
+logSize=$1
+shift
+if [ $# -eq 0 ]
+then
+  createDatabase=R
+else
+  createDatabase=$1
+fi
+
+DBBackupDir=$SybaseRoot/db/backup
+sybBinDir=$SybaseRoot/bin
+SYBASE=$SybaseRoot
+export SYBASE
+
+##################
+# DROP DATABASES #
+##################
+if [ $createDatabase -eq 1 ]
+then
+$SybaseRoot/bin/isql -U$DBAdminLogin -P$DBAdminPasswd -S$dataServer << !
+DROP DATABASE vpusers
+DROP DATABASE vpplaces
+DROP DATABASE audset
+GO
+!
+fi
+
+#####################
+# RESTORE DATABASES #
+#####################
+$ServicesRoot/restoreDatabase $SybaseRoot $ServicesRoot \
+ vpusers vpusr vpusr1 $DBAdminLogin $DBAdminPasswd $dataServer \
+ $databaseSize $logSize $createDatabase
+$ServicesRoot/restoreDatabase $SybaseRoot $ServicesRoot \
+ vpplaces vpplaces vpplaces $DBAdminLogin $DBAdminPasswd $dataServer \
+ $databaseSize $logSize $createDatabase
+$ServicesRoot/restoreDatabase $SybaseRoot $ServicesRoot \
+ audset audset audset1 $DBAdminLogin $DBAdminPasswd $dataServer \
+ $databaseSize $logSize $createDatabase
+
+$ServicesRoot/backupMasterDB $SybaseRoot $DBAdminLogin $DBAdminPasswd $dataServer
+$ServicesRoot/runFullBackup
+$ServicesRoot/manageBackupCopies $ServicesRoot
+
+echo
+echo ----------------------
+echo

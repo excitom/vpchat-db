@@ -1,0 +1,11 @@
+/*
+ * Credit cards and bank accounts that we do not wish to honor.
+ */ 
+CREATE TABLE badCredit
+(
+	ccID		userIdentifier,
+	type		tinyint,
+	comment		VARCHAR(255),
+		CONSTRAINT badCredit UNIQUE ( ccID, type )
+)
+GO

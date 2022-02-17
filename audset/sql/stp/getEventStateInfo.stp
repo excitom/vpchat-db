@@ -1,0 +1,18 @@
+/* for a specific state for one specific event,
+   get welcome message and title */
+/* input:  event id, state id
+   output: image
+*/
+CREATE PROC getEventStateInfo
+(
+  @eventID numeric(10,0),
+  @stateID numeric(4,0)
+)
+AS
+BEGIN
+  SELECT welcomeMsg1, welcomeMsg2, PTGtitle
+    FROM eventState
+    WHERE eventID = @eventID AND
+          stateID = @stateID
+END
+GO

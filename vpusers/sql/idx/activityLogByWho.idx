@@ -1,0 +1,4 @@
+CREATE INDEX activityLogByWho
+ON activityLog ( who )
+ON userDetailsSeg
+GO

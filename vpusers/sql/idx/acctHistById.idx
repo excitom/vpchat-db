@@ -1,0 +1,5 @@
+CREATE CLUSTERED INDEX acctHistById
+ON accountHistory ( accountID )
+WITH ALLOW_DUP_ROW
+ON userDetailsSeg
+GO

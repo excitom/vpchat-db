@@ -1,0 +1,82 @@
+/* delete a user-created place
+ *
+ *  INPUT  : accountID, URL to delete
+ *  OUTPUT : return value - 0 if successful
+ *                        20001 if place/account ID not found
+ *                        20004 change too frequent (server hasn't caught up)
+ */
+IF EXISTS(SELECT name FROM sysobjects WHERE name='delUserPlace' AND type='P')
+ DROP PROC delUserPlace
+GO
+CREATE PROC delUserPlace
+(
+  @accountID userIdentifier,
+  @URL UrlType
+)
+AS
+BEGIN
+  DECLARE @lastError int
+  DECLARE @category categoryIdentifier
+  DECLARE @canonicURL UrlType
+
+  SELECT @canonicURL = lower(@URL)
+  
+  BEGIN TRAN delUserPlace
+    SELECT @category = category
+      FROM userPlaces
+      WHERE accountID = @accountID
+      AND lower(URL) = @canonicURL
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN delUserPlace
+      RETURN @lastError
+    END
+
+    IF @category = NULL
+    BEGIN
+      ROLLBACK TRAN delUserPlace
+      RETURN 20001
+    END
+
+    /* 
+     * check persistent places change table for a dup.
+     * if there is, we're changing stuff too fast for the VPS to
+     * keep up. slow down. take a break. chill.
+     */
+    IF EXISTS ( SELECT * FROM persistentPlacesChange WHERE lower(URL) = @canonicURL )
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20004
+    END
+   
+    IF EXISTS ( SELECT * FROM placeCategories WHERE lower(URL) = @canonicURL AND category = @category )
+    BEGIN
+      EXEC delPlaceFromCategory @category, @URL
+    END
+
+    IF EXISTS ( SELECT * FROM persistentPlaces WHERE lower(URL) = @canonicURL )
+    BEGIN
+      EXEC delPersistentPlace @URL
+    END
+
+    DELETE userPlaces
+      WHERE accountID = @accountID
+      AND lower(URL) = @canonicURL
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN delUserPlace
+      RETURN @lastError
+    END
+    
+  COMMIT TRAN delUserPlace
+  RETURN 0
+END
+GO 
+GRANT EXECUTE ON delUserPlace TO vpusr
+GO
+GRANT EXECUTE ON delUserPlace TO audset
+GO

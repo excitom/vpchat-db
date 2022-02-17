@@ -1,0 +1,16 @@
+/* Edit the details of one event interaction */
+/* input:  interaction id, text, category
+   output: None
+*/
+CREATE PROC editInteraction( 
+               @interactionID numeric(10,0),
+               @text	      longName,
+               @category      varchar(16) )
+AS
+BEGIN
+    UPDATE eventInteractions
+    SET text = @text, category = @category
+    FROM eventInteractions ( INDEX primaryKey )
+    WHERE interactionID = @interactionID
+END
+GO

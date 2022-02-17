@@ -1,0 +1,21 @@
+/* get details of all events that are active right now */
+/* input:  NONE
+   output: list of events, stating for each event -
+   event id, auditorium name, stage URL, 
+   current state, current state welcome msg, state title
+   NOTE: ACTIVE events are defined by being at OPEN state or
+   at STARTED state.
+*/
+CREATE PROC getActiveEvents
+AS
+  SELECT 
+	events.eventID, events.auditorium, stageBackground,
+        events.currentState, correctStates.stateID AS correctState,
+        eventState.welcomeMsg1, eventState.welcomeMsg2, 
+        eventState.PTGtitle
+    FROM events, eventState, correctStates
+    WHERE events.eventID = eventState.eventID AND
+          events.currentState = eventState.stateID AND
+          events.eventID = correctStates.eventID AND
+	  events.currentState IN (1,2)
+GO

@@ -1,0 +1,37 @@
+/*
+ * User-created rooms.
+ *
+ * It seems like a waste to copy all the stuff in persistentPlaces and
+ * placeCategories, but these tables have evolved and it's too much 
+ * trouble to change legacy data and code.
+ *
+ * Users can request to have rooms listed, and they are put in Cool Places
+ * (i.e. persistentPlaces) and also put into a Category (placeCategories).
+ * When a user account is suspended for some reason (overdue payment, 
+ * discipline problem) the listing is removed from these tables but a
+ * copy is here so it can be easily restored (for exanple, if they pay
+ * the bill and the account is no longer suspended).
+ *
+ * Also, this table keeps track of how many rooms are listed per account.
+ *
+ * Tournament rooms do not count toward the account limit.
+ *
+ */
+CREATE TABLE userPlaces
+(
+	userPlaceID	userIdentifier			IDENTITY
+			constraint isPrimary primary key,
+	accountID	userIdentifier			NOT NULL,
+	category	categoryIdentifier		NOT NULL
+             CONSTRAINT userPlaceCategoryRefCategories REFERENCES categories,
+	URL		UrlType				NOT NULL,
+                        	CONSTRAINT uniqueUserPlaceCategory
+					UNIQUE( category, URL ),
+	domainFlag	bit		DEFAULT 1	NOT NULL,
+	type		integer				NOT NULL,
+	title		longName			NOT NULL,
+	roomCapacity	integer				NOT NULL,
+	roomProtected	bit				NOT NULL,
+	tournament	bit				NOT NULL
+)
+GO

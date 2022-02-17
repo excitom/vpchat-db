@@ -1,0 +1,6 @@
+CREATE VIEW noOfPlacesView
+AS
+  SELECT time, count(distinct substring(URL,1,200)) AS placeCount
+  FROM placeUsage
+  GROUP BY time
+GO

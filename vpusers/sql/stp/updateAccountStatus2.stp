@@ -1,0 +1,194 @@
+/* update a user account record */
+/* input:  accountID, status
+   accountStatus:
+	0 = OK
+	1 = new
+	2 = pending
+	3 = closed
+	4 = suspended - penalty
+	5 = suspended - overdue
+   output: Return value - 0 - success 
+                          20001 - No such account existed in database
+*/
+CREATE PROC updateAccountStatus2 ( @accountID userIdentifier, @accountStatus tinyInt )
+AS
+BEGIN
+  DECLARE @lastError int
+  DECLARE @aid userIdentifier
+  DECLARE @diffFromGMT int
+  DECLARE @lastUpdated VpTime
+  DECLARE @oldStatus tinyint
+
+  DECLARE @sOK		tinyint
+  DECLARE @sNew		tinyint
+  DECLARE @sPending	tinyint
+  DECLARE @sClosed	tinyint
+  DECLARE @sSuspended	tinyint
+  DECLARE @sOverdue	tinyint
+  SELECT  @sOK		= 0
+  SELECT  @sNew		= 1
+  SELECT  @sPending	= 2
+  SELECT  @sClosed	= 3
+  SELECT  @sSuspended	= 4
+  SELECT  @sOverdue	= 5
+  
+  BEGIN TRAN updateAccountStatus
+    
+    SELECT @diffFromGMT = gmt
+      FROM getGMT
+    IF @diffFromGMT IS NULL
+      SELECT @diffFromGMT = 0
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN  updateAccountStatus
+      RETURN @lastError
+    END
+
+    SELECT @lastUpdated = dateadd( hour, (-1) * @diffFromGMT, getdate() )
+
+    SELECT @aid = accountID, @oldStatus = accountStatus
+      FROM userAccounts
+      WHERE accountID = @accountID
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN updateAccountStatus
+      RETURN @lastError
+    END
+
+    IF @accountID != @aid
+    BEGIN
+      ROLLBACK TRAN updateAccountStatus
+      RETURN 20001
+    END
+
+    /*
+     * update the new status and the account change time stamp
+     */
+    UPDATE userAccounts
+      SET accountStatus = @accountStatus,
+          lastUpdated = @lastUpdated
+      WHERE accountID = @accountID
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN updateAccountStatus
+      RETURN @lastError
+    END
+    
+    /*
+     * unlock user names if new status is OK or PENDING
+     * lock user names if new status is anything else
+     */
+    DECLARE @locked bit
+    IF @accountStatus = @sOK OR @accountStatus = @sPending
+      SELECT @locked = 0
+    ELSE
+      SELECT @locked = 1
+
+    UPDATE users
+      SET locked = @locked
+      WHERE users.userID IN
+        ( SELECT registration.userID
+          FROM   registration
+          WHERE  accountID = @accountID )
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN updateAccountStatus
+      RETURN @lastError
+    END
+
+    /*
+     * if new status = CLOSED then deactivate subscription, if any
+     */
+    IF @accountStatus = @sClosed AND EXISTS (SELECT * FROM subscriptions WHERE accountID = @accountID AND autoRenew = 1)
+    BEGIN
+      UPDATE subscriptions SET autoRenew = 0 WHERE accountID = @accountID
+
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN  updateAccountStatus
+        RETURN @lastError
+      END
+    END
+
+  COMMIT TRAN updateAccountStatus
+
+  /*
+   * Lock/unlock user's home pages, if any.
+   *
+   * Delete the home pages if account is closing.
+   *
+   * This is done outside the transaction since it's not super
+   * critical that it succeed and we don't want failure to undo 
+   * the previous operations.
+   */
+   DECLARE @userID	userIdentifier
+   DECLARE @URL		UrlType
+   DECLARE @URL2	UrlType
+   DECLARE @maxSpace	int
+   DECLARE @maxTransfer	int
+ 
+   DECLARE userCursor CURSOR
+     FOR SELECT registration.userID, URL, URL2, maxSpace, maxTransfer
+       FROM registration, vpplaces..homePages
+       WHERE accountID = @accountID
+       AND   vpplaces..homePages.userID = registration.userID
+
+   OPEN userCursor
+   WHILE ( @@sqlstatus = 0 )
+   BEGIN
+     FETCH userCursor INTO @userID, @URL, @URL2, @maxSpace, @maxTransfer
+     IF @@sqlstatus = 0
+     BEGIN
+       IF @accountStatus = @sClosed
+       BEGIN
+         DECLARE @cleanup tinyint
+         SELECT @cleanup = 1
+print "UPDATE delHomePage "
+         EXEC vpplaces..delHomePage @userID, @cleanup
+print "UPDATE delHomePage done"
+       END
+       ELSE BEGIN
+         IF @accountStatus = @sOK AND @oldStatus = @sClosed
+         BEGIN
+print "UPDATE addHomePage "
+           EXEC vpplaces..addHomePage @userID,@maxSpace,@maxTransfer,@URL,@URL2
+print "UPDATE addHomePage done"
+         END
+         ELSE BEGIN
+           IF @URL2 IS NOT NULL
+           BEGIN
+             SELECT @URL = @URL2
+           END
+print "UPDATE updateHomePage "
+           EXEC vpplaces..updateHomePage @userID, 'L', @locked, @URL
+print "UPDATE updateHomePage done"
+         END
+       END
+     END
+   END
+   CLOSE userCursor
+
+  /*
+   * If account has user-created chat rooms, update their status.
+   * this is done outside the transaction since it doesn't matter if
+   * it fails (as it will in many cases, e.g. account does not have
+   * a user-created room listing).
+   */
+  DECLARE @activate bit
+  SELECT @activate = 1 - @locked
+print "UPDATE updateUserPlace"
+  EXEC vpplaces..updateUserPlace @accountID, @activate
+print "UPDATE updateUserPlace done"
+
+  RETURN 0
+END
+GO

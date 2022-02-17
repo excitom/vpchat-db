@@ -1,0 +1,15 @@
+/* input:  URL
+   output: NONE
+
+  NOTE: this is done in a separate stored procedure from 
+        delPersistentPlace because it deals with persistent 
+        places that weren't reported yet to the VP server
+*/
+CREATE PROC delPPlace
+(
+  @URL longName
+)
+AS
+  DELETE persistentPlaces
+    WHERE URL = @URL
+GO

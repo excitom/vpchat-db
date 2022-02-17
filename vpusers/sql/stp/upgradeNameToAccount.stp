@@ -1,0 +1,255 @@
+/* convert a user name to be a new account owner
+
+   author: Tom Lang 6/2002
+
+   If no password is provided then the existing password is retained.
+
+   If a password is provided it must match the existing password in
+   order to proceed.
+
+   returns:
+           0 - success,
+           20001 - nickName not found
+           20002 - password doesn't match
+           20003 - user name already is an account owner
+*/
+IF EXISTS(SELECT name FROM sysobjects WHERE name='upgradeNameToAccount' AND type='P')
+ DROP PROC upgradeNameToAccount
+GO
+CREATE PROC upgradeNameToAccount
+( 
+  @nickName		VPuserID,
+  @email		longName,
+  @accountType		smallInt,
+  @promo		tinyInt,
+  @billingCycle		tinyInt,
+  @unitCost		smallmoney,
+  @discount		float,
+  @nameLimit		smallInt,
+  @password		VPPassword = NULL
+)
+AS
+BEGIN
+  DECLARE @localMode integer
+  SELECT  @localMode = 2
+  DECLARE @accountStatus tinyInt
+  SELECT  @accountStatus = 1
+  DECLARE @paymentStatus tinyInt
+  SELECT  @paymentStatus = 1
+  DECLARE @enrolledReferrer bit
+  SELECT  @enrolledReferrer = 0
+  DECLARE @diffFromGMT int
+  DECLARE @creationDate VpTime
+  DECLARE @renewalDate VpTime
+  DECLARE @lastError int
+  DECLARE @newUserID userIdentifier
+  DECLARE @ownerID userIdentifier
+  DECLARE @accountsForEmail integer
+  DECLARE @accountsPermitted integer
+  DECLARE @buddyListName longName
+  DECLARE @subscription smallmoney
+  DECLARE @oldPw VPPassword
+  DECLARE @oldAcctID userIdentifier
+
+  SELECT @newUserID = NULL
+  
+  /* turn all user ID to lower case, to get case insensitive comparisons */
+  SELECT @nickName = lower(@nickName)
+  SELECT @nickName = ltrim(@nickName)
+  SELECT @email = lower(@email)
+  SELECT @email = ltrim(@email)
+
+  BEGIN TRAN upgradeNameToAccount
+    
+    SELECT @newUserID = users.userID,
+           @oldPw = password,
+           @ownerID = ownerID,
+           @oldAcctID = userAccounts.accountID
+      FROM users, registration, userAccounts
+      WHERE nickName = @nickName
+      AND registrationMode = 2
+      AND users.userID = registration.userID
+      AND registration.accountID = userAccounts.accountID
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN ugradeNameToAccount
+      RETURN @lastError
+    END
+
+    IF @newUserID IS NULL
+    BEGIN
+      ROLLBACK TRAN upgradeNameToAccount
+      RETURN 20001
+    END
+
+    IF @ownerID = @newUserID
+    BEGIN
+      ROLLBACK TRAN upgradeNameToAccount
+      RETURN 20003
+    END
+
+    IF @password IS NOT NULL
+    BEGIN
+      IF @password != @oldPw
+      BEGIN
+        ROLLBACK TRAN upgradeNameToAccount
+        RETURN 20002
+      END
+    END
+
+    /* get current time and date */
+    SELECT @diffFromGMT = gmt
+      FROM getGMT
+    IF @diffFromGMT IS NULL
+      SELECT @diffFromGMT = 0
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN upgradeNameToAccount
+      RETURN @lastError
+    END
+
+    SELECT @creationDate = dateadd( hour, (-1) * @diffFromGMT, getdate() )
+    SELECT @renewalDate  = dateadd( month, @billingCycle, @creationDate )
+    IF @promo > 0
+    BEGIN
+      SELECT @renewalDate = dateadd( week, @promo, @renewalDate )
+    END
+
+    /*
+     * Create the userAccount table entry
+     */
+    DECLARE @accountID userIdentifier
+    IF EXISTS (SELECT * FROM userAccounts WHERE accountID = @newUserID)
+    BEGIN
+      /* It's possible that this name was an account owner in the past,
+       * which means we can't use his userID as the new account ID. We'll
+       * create a dummy user table entry just to get a new unique ID.
+       */
+       DECLARE @dummy VPuserID
+       SELECT @dummy = @nickName
+       IF char_length(@dummy) = 20
+         SELECT @dummy = substring(@dummy,1,19)
+       SELECT @dummy = ',' + @dummy
+       INSERT users ( nickName, registrationMode, locked, restricted, penalties, warnings, ignores )
+        VALUES ( @dummy, 2, 0, 0, 0, 0, 0 )
+      
+       SELECT @lastError = @@error
+       IF @lastError != 0
+       BEGIN
+         ROLLBACK TRAN upgradeNameToAccount
+         RETURN @lastError
+       END
+      
+       SELECT @accountID = @@identity
+
+       DELETE users WHERE userID = @accountID	-- delete dummy user entry
+
+       SELECT @lastError = @@error
+       IF @lastError != 0
+       BEGIN
+         ROLLBACK TRAN upgradeNameToAccount
+         RETURN @lastError
+       END
+    END
+    ELSE BEGIN
+      SELECT @accountID = @newUserID
+    END
+
+    INSERT userAccounts ( accountID, ownerID, accountType, accountStatus, billingCycle, creationDate, renewalDate, lastUpdated, nameLimit, referredByID, referredBy, enrolledReferrer, discount, paymentStatus, unitCost, email )
+      VALUES ( @accountID, @newUserID, @accountType, @accountStatus, @billingCycle, @creationDate, @renewalDate, NULL, @nameLimit, 0, " ", @enrolledReferrer, @discount, @paymentStatus, @unitCost, @email )
+        
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN upgradeNameToAccount
+      RETURN @lastError
+    END
+
+    SELECT @subscription = @unitCost * @billingCycle - (@unitCost * @billingCycle * @discount)
+    INSERT accountBalance (accountID, subscription, referral) 
+      VALUES (@accountID, @subscription, 0)
+        
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN ugradeNameToAccount
+      RETURN @lastError
+    END
+
+    /*
+     * Initialize renewal stats
+     */
+    INSERT renewals (accountID, freeTrial, oldAcct, months, renewals, wentOverdue, upgrades, goodChecks, badChecks, namesAdded, chargebacks)
+      VALUES (@accountID, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+        
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN ugradeNameToAccount
+      RETURN @lastError
+    END
+
+    /* convert the existing user to an account owner */
+
+    UPDATE registration SET accountID = @accountID WHERE userID = @newUserID
+        
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN ugradeNameToAccount
+      RETURN @lastError
+    END
+
+    UPDATE users SET locked = 1 WHERE userID = @newUserID
+        
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN ugradeNameToAccount
+      RETURN @lastError
+    END
+
+    INSERT upgradedNames (accountID, oldAccountID)
+      VALUES( @accountID, @oldAcctID )
+        
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN ugradeNameToAccount
+      RETURN @lastError
+    END
+
+    /*
+     * Grant the account owner some freebie points
+     * Note: The UPDATE case handles a person who converts a name
+     * into an account owner.
+     */
+    IF EXISTS (SELECT * FROM userPoints WHERE userID = @newUserID)
+    BEGIN
+      UPDATE userPoints
+        SET points = points + (@nameLimit * 500)
+        WHERE userID = @newUserID
+    END
+    ELSE BEGIN
+      INSERT userPoints (userID, points)
+        VALUES (@newUserID, (@nameLimit * 500))
+    END
+
+    /* send userID / accountID to output */
+    SELECT @accountID AS accountID, @newUserID AS userID
+  COMMIT TRAN upgradeNameToAccount
+
+  EXEC addAcctHistory @accountID, 17, @oldAcctID
+
+  RETURN 0
+END
+GO 
+IF OBJECT_ID('dbo.upgradeNameToAccount') IS NOT NULL
+        PRINT '<<< CREATED PROCEDURE dbo.upgradeNameToAccount >>>'
+ELSE
+        PRINT '<<< FAILED CREATING PROCEDURE dbo.upgradeNameToAccount >>>'
+GO

@@ -1,0 +1,53 @@
+/* Find reward points for an account,
+ * or all accounts (if userID = 0)
+ *
+ * Also, there is a list of accounts to hide. The "showAll" flag 
+ * controls whether this list is used. 
+ *
+ * output: Return value - 0 - success 
+ *                        20001 - No such user
+ */
+IF EXISTS
+ (SELECT name FROM sysobjects WHERE name = 'getUserPoints' AND type = 'P') 
+ DROP PROC getUserPoints
+GO  
+CREATE PROC getUserPoints (
+    @userID	userIdentifier = 0,
+    @showAll	bit = 0
+)
+AS
+BEGIN
+  IF @userID != 0
+  BEGIN
+    IF NOT EXISTS(SELECT * FROM userPoints WHERE userID = @userID)
+    BEGIN
+      RETURN 20001
+    END
+    SELECT points,nickName
+      FROM userPoints p, users u
+      WHERE p.userID = @userID
+      AND p.userID=u.userID
+  END
+  ELSE BEGIN
+    IF @showAll = 1
+    BEGIN
+      SELECT p.userID,nickName,points
+        FROM userPoints p, users u
+        WHERE u.userID = p.userID
+        ORDER BY points DESC
+    END
+    ELSE BEGIN
+      SELECT p.userID,nickName,points
+        FROM userPoints p, users u
+        WHERE u.userID = p.userID
+        AND u.userID NOT IN (SELECT userID FROM hiddenPoints)
+        ORDER BY points DESC
+    END
+  END
+END
+GO
+IF OBJECT_ID('dbo.getUserPoints') IS NOT NULL
+	PRINT '<<< CREATED PROCEDURE dbo.getUserPoints >>>'
+ELSE
+	PRINT '<<< FAILED CREATING PROCEDURE dbo.getUserPoints >>>'
+GO

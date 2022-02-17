@@ -1,0 +1,4 @@
+/* userVotesIndex */
+CREATE INDEX userVotesIdx
+ON userVotes ( voteID, optionID )
+GO

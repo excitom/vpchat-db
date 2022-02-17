@@ -1,0 +1,88 @@
+/*
+ * find reminders that are expired.
+ * deletes the one that that don't repeat.
+ * update the notify date for the periodic ones.
+ *
+ */
+CREATE PROC getReminders (@withPrefix bit = 1)
+AS
+BEGIN
+  DECLARE @lastError	int
+  DECLARE @diffFromGMT	int
+  DECLARE @reminderID	userIdentifier
+  DECLARE @notifyDate	VpTime
+  DECLARE @notifyEmail	longName
+  DECLARE @targetAcctID	userIdentifier
+  DECLARE @targetName	VPuserID
+  DECLARE @notifyName	VPuserID
+  DECLARE @repCount	smallint
+  DECLARE @comment	VARCHAR(255)
+
+  SELECT @diffFromGMT = gmt
+    FROM getGMT
+  IF @diffFromGMT IS NULL
+    SELECT @diffFromGMT = 0
+    
+  SELECT @lastError = @@error
+  IF @lastError != 0
+  BEGIN
+    ROLLBACK TRAN 
+    RETURN @lastError
+  END
+
+  SELECT @notifyDate = dateadd( hour, (-1) * @diffFromGMT, getdate() )
+
+  DECLARE reminderCursor CURSOR
+  FOR SELECT reminderID, targetAcctID, targetName, notifyEmail, comment, repCount
+        FROM remindersWithNames
+        WHERE notifyDate <= @notifyDate
+
+  OPEN reminderCursor
+  FETCH reminderCursor
+    INTO @reminderID, @targetAcctID, @targetName, @notifyEmail, @comment, @repCount
+
+  WHILE ( @@sqlstatus = 0 )
+  BEGIN
+    /*
+     * send to output
+     */
+    IF @withPrefix = 1
+    BEGIN
+      SELECT 'Notify', @targetAcctID, @targetName, @notifyEmail
+      SELECT 'Comment', @comment
+    END
+    ELSE BEGIN
+      SELECT @targetAcctID, @targetName, @notifyEmail
+      SELECT @comment
+    END
+
+    IF @repCount > 0
+    BEGIN
+      UPDATE reminders
+        SET repCount = repCount - 1,
+            notifyDate = dateadd( day, interval, notifyDate )
+        WHERE reminderID = @reminderID
+    END
+ 
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+          
+    FETCH reminderCursor
+      INTO @reminderID, @targetAcctID, @targetName, @notifyEmail, @comment, @repCount
+
+  END
+  COMMIT TRAN
+
+  /*
+   * delete reminders where count went to zero. don't do this in the 
+   * loop because is messes up the cursor. use <= test just in case
+   * we miss one somehow.
+   */
+  DELETE reminders WHERE repCount <= 0
+  
+END
+GO

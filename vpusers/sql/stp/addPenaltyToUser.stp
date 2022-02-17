@@ -1,0 +1,276 @@
+/* --- add a penalty for a user --- */
+  /* make sure no user has two different penalty records for the same type of penalty - */
+  /* keep only the one that expires the latest. If we have two with the same expiry time, */
+  /* keep this last one. */
+  /* NOTE the correction assumption that is made here: at any given time, there one record */
+  /* at the most with a certain penalty type for a given user. */
+/*
+  input : penalized user - nick name, reg.mode,
+          penalty type, penalty duration (in minutes),
+          issued by - nick name, reg.mode,
+          comment,
+          allow Aux as local (optional - default = FALSE)
+  output: return value - 0 - success
+                         20001 - tried to add penalty to user in local registration
+                             that was not registered
+                             (unless @allowAuxAsLocal = TRUE)
+                         20002 - tried to add penalty issued by user
+                             in local registration mode,
+                             that was not registered
+                             (unless @allowAuxAsLocal = TRUE)
+*/
+CREATE PROC addPenaltyToUser
+( @userName VPuserID, @regMode VpRegMode, @penaltyType penType, @minutesDuration integer,
+  @issuedBy VPuserID, @issuerRegMode VpRegMode, 
+  @comment longName,
+  @allowAuxAsLocal bit = 0,
+  @diffFromGMT int = NULL
+)
+AS
+BEGIN
+  DECLARE @penalizedUserID userIdentifier
+  DECLARE @issuerID userIdentifier
+  DECLARE @expiryTime VpTime
+  DECLARE @currentExpiry VpTime
+  DECLARE @currentPenaltyID integer
+  DECLARE @currentPenaltyIsForgiven bit
+  DECLARE @insertNewRecord integer
+  DECLARE @archiveOldRecord integer
+  DECLARE @lastError int
+  DECLARE @retVal int
+  DECLARE @issueDate VpTime
+  DECLARE @localTransaction bit
+  SELECT @localTransaction = 1 - sign( @@trancount )
+  
+  /* turn all user ID to lower case, to get case insensitive comparisons */
+  SELECT @userName = lower(@userName)
+  SELECT @issuedBy = lower(@issuedBy)
+
+  IF @localTransaction = 1
+    BEGIN TRAN addPenaltyToUser
+    
+    IF @diffFromGMT IS NULL
+    BEGIN
+      SELECT @diffFromGMT = gmt
+      FROM getGMT
+      
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN addPenaltyToUser
+        RETURN @lastError
+      END
+      
+      IF @diffFromGMT IS NULL
+        SELECT @diffFromGMT = 0
+    END
+    
+    SELECT @issueDate = dateadd( hour, (-1) * @diffFromGMT, getdate() )
+    SELECT @expiryTime= dateadd( minute, @minutesDuration, @issueDate )
+    
+    /* find user records for penalized user and issuer,
+       or create them if necessary                      */
+    EXEC @retVal = 
+      updateUser @penalizedUserID OUTPUT, @userName, @regMode, @allowAuxAsLocal
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      IF @localTransaction = 1
+        ROLLBACK TRAN
+      RETURN @lastError
+    END
+    
+    IF ( @retVal NOT IN ( 20001, 20002, 0 ) )
+    BEGIN
+      IF @localTransaction = 1
+        ROLLBACK TRAN
+      RETURN @retVal
+    END
+    
+    IF ( @retVal = 20002 )
+    BEGIN
+      IF @localTransaction = 1
+        ROLLBACK TRAN
+      RETURN 20001
+    END
+    
+    IF @penalizedUserID = 0
+    BEGIN
+      IF @localTransaction = 1
+        ROLLBACK TRAN
+      RETURN 20001
+    END
+    
+    EXEC @retVal = 
+      updateUser @issuerID OUTPUT, @issuedBy, @issuerRegMode, @allowAuxAsLocal
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      IF @localTransaction = 1
+        ROLLBACK TRAN
+      RETURN @lastError
+    END
+    
+    IF ( @retVal NOT IN ( 20001, 0 ) )
+    BEGIN
+      IF @localTransaction = 1
+        ROLLBACK TRAN
+      RETURN @retVal
+    END
+    
+    IF @issuerID = 0
+    BEGIN
+      IF @localTransaction = 1
+        ROLLBACK TRAN
+      RETURN 20002
+    END
+    
+    /* first find current expiry time for this penalty, if user has this penalty */
+    /* correctness assumption - user always has one or zero penalty records for
+       a given penalty type. Otherwise we'd have to find the MAX of expiry time. */
+    SELECT @currentPenaltyIsForgiven = 0
+    SELECT 
+        @currentExpiry = expiresOn, 
+        @currentPenaltyID = penaltyID, 
+        @currentPenaltyIsForgiven = forgiven 
+      FROM penalties
+      WHERE userID = @penalizedUserID AND
+            penaltyType = @penaltyType
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      IF @localTransaction = 1
+        ROLLBACK TRAN
+      RETURN @lastError
+    END
+    
+    SELECT @insertNewRecord = 1
+    SELECT @archiveOldRecord = 0
+    IF ( @currentExpiry IS NOT NULL ) BEGIN
+      IF ( @currentPenaltyIsForgiven = 1 ) OR 
+         ( @currentExpiry <= @issueDate )
+        /* the current penalty is expired or forgiven */
+        SELECT @archiveOldRecord = 1
+      ELSE
+        IF ( @currentExpiry <= @expiryTime )
+          /* current penalty has not expired yet,
+             but the new penalty lasts longer,
+             so the current penalty will give way
+             to the new penalty */
+          SELECT @archiveOldRecord = 1
+        ELSE
+          /* this new penalty is superseded by the
+             existing one, which will last longer */
+          SELECT @insertNewRecord = 0
+    END
+    
+    /* if there was already a penalty record and we decided to insert the new record into
+       the penalties table, then first move that old record into history table. */
+    IF ( @archiveOldRecord = 1 )
+    BEGIN
+      /* put the old penalty record into the history table */
+      INSERT INTO history
+        SELECT * FROM penalties
+          WHERE penaltyID = @currentPenaltyID
+      
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+      IF @localTransaction = 1
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+      
+      /* delete the old penalty record from the penalties table */
+      DELETE FROM penalties
+        WHERE penaltyID = @currentPenaltyID
+      
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        IF @localTransaction = 1
+          ROLLBACK TRAN
+        RETURN @lastError
+      END
+      
+    END
+    
+    /* now put new record into penalties table or history table */
+    DECLARE @newID integer
+    DECLARE @maxPenaltiesID integer
+    DECLARE @maxHistoryID integer
+    SELECT @maxHistoryID = max(penaltyID) FROM history
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      IF @localTransaction = 1
+        ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    IF @maxHistoryID IS NULL
+      SELECT @maxHistoryID = 0
+    SELECT @maxPenaltiesID = max(penaltyID) FROM penalties
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      IF @localTransaction = 1
+        ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    IF @maxPenaltiesID IS NULL
+      SELECT @maxPenaltiesID = 0
+    IF @maxHistoryID > @maxPenaltiesID
+      SELECT @newID = @maxHistoryID + 1
+    ELSE
+      SELECT @newID = @maxPenaltiesID + 1
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      IF @localTransaction = 1
+        ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    IF ( @insertNewRecord = 1 )
+      INSERT INTO penalties
+        ( penaltyID, userID, penaltyType, expiresOn, issuedOn, issuedBy, forgiven, comment )
+        values ( @newID, @penalizedUserID, @penaltyType, @expiryTime, @issueDate, @issuerID, 0, @comment )
+
+    ELSE /* ( @insertNewRecord = 0 ) ==> move new record directly to history */
+      INSERT INTO history
+        ( penaltyID, userID, penaltyType, expiresOn, issuedOn, issuedBy, forgiven, comment )
+        values ( @newID, @penalizedUserID, @penaltyType, @expiryTime, @issueDate, @issuerID, 0, @comment )
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      IF @localTransaction = 1
+        ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    UPDATE users
+    SET penalties = penalties + 1
+    WHERE userID = @penalizedUserID
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      IF @localTransaction = 1
+        ROLLBACK TRAN
+      RETURN @lastError
+    END
+    
+  IF @localTransaction = 1
+    COMMIT TRAN addPenaltyToUser
+
+END
+GO 

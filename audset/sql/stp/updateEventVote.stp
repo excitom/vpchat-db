@@ -1,0 +1,18 @@
+/* Updates an event vote description in the eventVotes table */
+/* input:  voteId, vote title, vote description, number of choices allowed. 
+   output: NONE
+*/
+CREATE PROC updateEventVote
+(
+  @voteID		numeric(10,0),
+  @title		varchar(50),
+  @description          varchar(200),
+  @numChoices		integer
+)
+AS
+
+  UPDATE eventVotes 
+    SET title = @title, description = @description, numChoices = @numChoices
+    WHERE voteID = @voteID
+   
+GO

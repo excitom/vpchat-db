@@ -1,0 +1,73 @@
+/* delete a user-created place, using it's ID
+ *
+ *  INPUT  : place ID
+ *  OUTPUT : return value - 0 if successful
+ *                        20001 if place/account ID not found
+ *                        20004 change too frequent (server hasn't caught up)
+ */
+CREATE PROC delUserPlaceById
+(
+  @userPlaceID userIdentifier
+)
+AS
+BEGIN
+  DECLARE @lastError int
+  DECLARE @category categoryIdentifier
+  DECLARE @URL UrlType
+  
+  BEGIN TRAN delUserPlaceById
+    SELECT @category = category,
+           @URL = URL
+      FROM userPlaces
+      WHERE userPlaceID = @userPlaceID
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN delUserPlaceById
+      RETURN @lastError
+    END
+
+    IF @category = NULL
+    BEGIN
+      ROLLBACK TRAN delUserPlaceById
+      RETURN 20001
+    END
+
+    /* 
+     * check persistent places change table for a dup.
+     * if there is, we're changing stuff too fast for the VPS to
+     * keep up. slow down. take a break. chill.
+     */
+    IF EXISTS ( SELECT * FROM persistentPlacesChange WHERE URL = @URL )
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20004
+    END
+   
+    IF EXISTS ( SELECT * FROM placeCategories WHERE URL = @URL AND @category = @category )
+    BEGIN
+      EXEC delPlaceFromCategory @category, @URL
+    END
+
+    IF EXISTS ( SELECT * FROM persistentPlaces WHERE URL = @URL )
+    BEGIN
+      EXEC delPersistentPlace @URL
+    END
+
+    DELETE userPlaces
+      WHERE userPlaceID = @userPlaceID
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN delUserPlaceById
+      RETURN @lastError
+    END
+    
+  COMMIT TRAN delUserPlaceById
+  RETURN 0
+END
+GO 
+GRANT EXECUTE ON delUserPlaceById TO vpusr
+GO

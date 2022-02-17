@@ -1,0 +1,14 @@
+/* delete all records from the event changes table */
+/* input:  NONE
+   output: NONE
+*/
+CREATE PROC clearEventChanges
+AS
+BEGIN
+  BEGIN TRAN
+
+  DELETE FROM eventChanges
+
+  COMMIT TRAN
+END
+GO

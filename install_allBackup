@@ -1,0 +1,80 @@
+#!/bin/sh
+
+# This script does the creation of the runBackup script
+
+DBBackupType=$1
+shift
+DBBackupDir=$1
+shift
+SybaseRoot=$1
+shift
+ServicesRoot=$1
+shift
+DbLoginName=$1
+shift
+DbLoginPassword=$1
+shift
+DataServer=$1
+shift
+backupPlan=$1
+shift
+backupInterval=$1
+shift
+fullBackupDay=$1
+shift
+backupTime=$1
+shift
+backupCopiesToHold=$1
+
+############################
+# GENERATE backupData file # 
+############################
+echo writing backup configuration
+cat << ! > $ServicesRoot/backupData.txt
+DBBackupType $DBBackupType
+DBBackupDir $DBBackupDir
+SybaseRoot $SybaseRoot
+ServicesRoot $ServicesRoot
+DbLoginName $DbLoginName
+DbLoginPassword $DbLoginPassword
+DataServer $DataServer
+backupPlan $backupPlan
+backupInterval $backupInterval
+fullBackupDay $fullBackupDay
+backupTime $backupTime
+backupCopiesToHold $backupCopiesToHold
+!
+
+###############################
+# GENERATE runFullBackup file # 
+###############################
+echo writing runFullBackup script
+cat << ! > $ServicesRoot/runFullBackup
+SYBASE=$SybaseRoot
+export SYBASE
+for scriptFile in $ServicesRoot/backup_*.sql
+{
+  echo 
+  echo
+  echo "running backup script" \$scriptFile
+  $SybaseRoot/bin/isql -U$DbLoginName -P$DbLoginPassword -S$DataServer -i \$scriptFile
+}
+!
+chmod a+x $ServicesRoot/runFullBackup
+
+######################################
+# GENERATE runIncrementalBackup file # 
+######################################
+echo writing runIncrementalBackup script
+cat << ! > $ServicesRoot/runIncrementalBackup
+SYBASE=$SybaseRoot
+export SYBASE
+for scriptFile in $ServicesRoot/incrementBackup_*.sql
+{
+  echo 
+  echo
+  echo "running backup script" \$scriptFile
+  $SybaseRoot/bin/isql -U$DbLoginName -P$DbLoginPassword -S$DataServer -i \$scriptFile
+}
+!
+chmod a+x $ServicesRoot/runIncrementalBackup

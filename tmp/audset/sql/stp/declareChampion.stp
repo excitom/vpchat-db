@@ -1,0 +1,64 @@
+/*
+ * Declare the champion of a tournament when there is no unambiguous winner
+ *
+ * Input: tournament ID, user ID
+ *
+ * Output: 0 = success
+ *         20000 = no such tournament
+ *         20001 = no such user
+ *         20002 = cannot declare champ
+ *
+ * Author: Tom Lang 1/2005
+ */
+IF EXISTS
+ (SELECT name FROM sysobjects WHERE name = 'declareChampion' AND type = 'P') 
+ DROP PROC declareChampion
+GO  
+CREATE PROC declareChampion ( 
+	@tournID	userIdentifier,
+	@userID		userIdentifier
+)
+AS
+BEGIN
+  DECLARE @lastError	int
+  DECLARE @notifyID	userIdentifier
+  DECLARE @player	VPuserID
+  DECLARE @teamMate	VPuserID
+  DECLARE @round	int
+
+  IF NOT EXISTS (SELECT * FROM tournaments WHERE tournID = @tournID)
+    RETURN 20000
+
+  IF NOT EXISTS (SELECT * FROM tournamentPlayers WHERE tournID = @tournID AND userID = @userID AND td = 0)
+    RETURN 20001
+
+  IF NOT EXISTS (SELECT * FROM tournaments WHERE tournID = @tournID AND status = 0x40)
+    RETURN 20002
+
+  UPDATE tournamentPlayers
+    SET prizeShare = 1.0
+    WHERE tournID = @tournID
+    AND    userID = @userID
+    AND        td = 0
+
+  SELECT @lastError = @@error
+  IF @lastError != 0
+  BEGIN
+    RETURN @lastError
+  END
+
+  EXEC updateTournament @tournID, 0x04
+
+  /* Post a message to the participants */
+       
+  SELECT @notifyID = notifyID, @round = currentRound
+    FROM tournaments
+    WHERE tournID = @tournID
+
+  SELECT @player = nickName FROM vpusers..users WHERE userID = @userID
+  SELECT @teamMate = nickName FROM vpusers..users WHERE userID IN
+    (SELECT userID FROM teamMates WHERE tournID = @tournID AND priUserID = @userID)
+  EXEC addTournamentMsg @tournID, @round, 2, @player, @teamMate
+
+END
+GO

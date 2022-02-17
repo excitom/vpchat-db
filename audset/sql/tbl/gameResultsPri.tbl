@@ -1,0 +1,30 @@
+/*
+ * Game results - primary
+ *
+ * This table was designed to work with the VP Game Club server, but it's
+ * not limited to use with only VP games. For that reason, the table index
+ * is the resultID rather than the gameID, which comes from the Game Club
+ * server. This also works around a potential problem in that the gameID
+ * is not guaranteed to be unique.
+ *
+ * The gameID column is optional.
+ *
+ * The game results are divided into a primary and seconday table, for two
+ * reasons.
+ * 1. A game has a single, unique result ID but up to 4 different players.
+ * 2. Common information, like when played and game type, don't need to
+ *    be duplicated for all the players in the game.
+ *
+ */
+CREATE TABLE gameResultsPri
+(
+	resultID	userIdentifier		 IDENTITY
+                        	CONSTRAINT isPrimary PRIMARY KEY,
+	gameID		integer			NULL,
+	-- notifyID joins with the notifyLists, privateLists,
+	-- and ladders tables.
+	notifyID	userIdentifier		NOT NULL,
+	gameTypeID	userIdentifier		NOT NULL,
+	whenPlayed	VpTime			NOT NULL
+)
+GO

@@ -1,0 +1,26 @@
+/*
+ * Players in game ladder tournaments
+ *
+ * The "td" flag indicates a tournament director, who is
+ * managing the tournmant but is not an active player. Since
+ * this list is used to determine who gets alert IMs regarding
+ * the tournament, the TD needs to be in this list as well as
+ * the active players.
+ *
+ */
+CREATE TABLE tournamentPlayers
+(
+	tournID		userIdentifier		NOT NULL,
+	userID		userIdentifier		NOT NULL,
+	initialRating	int			NOT NULL,
+	prizeShare	float			NOT NULL,
+	won		smallint		NULL,
+	lost		smallint		NULL,
+	tied		smallint		NULL,
+	-- points = (2 * won) + tied
+	buyIn		smallmoney		NULL,
+	prizeWon	smallmoney		NULL,
+	td		tinyint	DEFAULT 0	NOT NULL,
+	quit		bit
+)
+GO

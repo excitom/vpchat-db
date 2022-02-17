@@ -1,0 +1,161 @@
+/* change the billing cycle for an account
+   -- change the billingCycle field
+   -- adjust the renewal date
+
+   input:  account ID, new billing cycle, new discount
+           if billing cycle = 0, cancel pending change (if any)
+	   flag, force change if 1
+   output: 0 = success
+           1 = no change (new billing cycle = current)
+           20001 = account ID not found
+*/
+CREATE PROC changeBillingCycle ( @accountID userIdentifier, @newBC tinyint, @newDisc float, @force tinyint = 0 )
+AS
+BEGIN
+  DECLARE @lastError int
+  DECLARE @billingCycle tinyInt
+  DECLARE @diff int
+  DECLARE @renewalDate VpTime
+  DECLARE @diffFromGMT int
+  DECLARE @currentDate VpTime
+  DECLARE @accountStatus tinyint
+
+  BEGIN TRAN
+
+    /* cancel a pending change, if any */
+    IF @newBC = 0
+    BEGIN
+      DELETE FROM pendingAcctChanges WHERE accountID = @accountID
+      COMMIT TRAN
+      RETURN 0
+    END
+
+    SELECT @diffFromGMT = gmt
+      FROM getGMT
+    IF @diffFromGMT IS NULL
+      SELECT @diffFromGMT = 0
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    SELECT @currentDate = dateadd( hour, (-1) * @diffFromGMT, getdate() )
+
+    SELECT @billingCycle = billingCycle,
+           @accountStatus = accountStatus,
+           @renewalDate  = renewalDate
+      FROM userAccounts
+      WHERE accountID = @accountID
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+    IF @billingCycle IS NULL
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20001
+    END
+
+    IF @newBC = @billingCycle
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 1
+    END
+
+    /* if NEW account */
+
+    IF @accountStatus = 1 
+    BEGIN
+    
+      IF @newBC < @billingCycle
+      BEGIN
+        SELECT @diff = @billingCycle - @newBC
+        SELECT @renewalDate = dateadd( month, (-1) * @diff, @renewalDate )
+      END
+      ELSE BEGIN
+        SELECT @diff = @newBC - @billingCycle
+        SELECT @renewalDate = dateadd( month, @diff, @renewalDate )
+      END
+    
+      UPDATE userAccounts
+        SET billingCycle = @newBC,
+            discount     = @newDisc,
+            renewalDate  = @renewalDate,
+            lastUpdated  = @currentDate
+        WHERE  accountID = @accountID
+    
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN 
+        RETURN @lastError
+      END
+    END
+    /*
+       not (NEW or PENDING)
+         change the billing cycle immediately if past the renewal date
+	 or force flag set
+         else create a pending change record
+    */
+    ELSE
+    BEGIN
+      IF @currentDate >= @renewalDate OR @force = 1
+      BEGIN
+        UPDATE userAccounts
+          SET billingCycle = @newBC,
+              discount     = @newDisc,
+              lastUpdated  = @currentDate
+          WHERE  accountID = @accountID
+    
+        SELECT @lastError = @@error
+        IF @lastError != 0
+        BEGIN
+          ROLLBACK TRAN 
+          RETURN @lastError
+        END
+      END
+      /* create/update a pending change record */
+      ELSE BEGIN
+        IF EXISTS( SELECT accountID
+                     FROM pendingAcctChanges
+                     WHERE accountID = @accountID )
+        BEGIN
+          /* update previous pending change */
+          UPDATE pendingAcctChanges 
+            SET billingCycle = @newBC,
+                discount = @newDisc
+            WHERE accountID = @accountID
+    
+          SELECT @lastError = @@error
+          IF @lastError != 0
+          BEGIN
+            ROLLBACK TRAN 
+            RETURN @lastError
+          END
+        END
+        ELSE
+        BEGIN
+          /* create new change record */
+          INSERT INTO pendingAcctChanges
+            (accountID, billingCycle, discount)
+            VALUES (@accountID, @newBC, @newDisc)
+    
+          SELECT @lastError = @@error
+          IF @lastError != 0
+          BEGIN
+            ROLLBACK TRAN 
+            RETURN @lastError
+          END
+        END /* end, no previous pending change */
+      END /* end, before renewal date */
+    END /* end, not (NEW or PENDING) */
+  COMMIT TRAN
+  RETURN 0
+END
+GO 

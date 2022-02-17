@@ -1,0 +1,34 @@
+/* Clear from database all records for all users, 
+   either registered or others. with the excpetion
+   of the Services and the vpmanager                */
+CREATE PROC clearRegistration
+AS
+BEGIN
+  DECLARE @lastError int
+  
+  BEGIN TRAN
+    DELETE bannedNames
+      WHERE nickName != "__"
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+    
+    DELETE users
+      WHERE ( registrationMode != 2 ) OR
+            ( ( substring(nickName,1,2) != "__" ) AND
+              ( nickName != "vpmanager" ) )
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+    
+  COMMIT TRAN
+END
+GO

@@ -1,0 +1,263 @@
+/* transfer, atomically, money from the referral bonus to the
+   subscription balance.
+
+   input:  account ID, amount,
+		optional flag: if not enough available, transfer as
+		much as possible.
+
+		second optional flag: new (one-time payment) referral
+		program - update the subscription balance and the 
+		referral history, but don't decrement the referral
+		balance (since this only has funds from the original
+		monthly program).
+
+   update 1/2004: one-time payments are now added to the referral balance
+
+   output: Return value - 0 - success 
+                          20001 - No such account existed in database
+                          20002 - Not enough balance to transfer
+                          20003 - Not enough balance to transfer, but
+				   all available was transferred.
+*/
+CREATE PROC transferBonusToSubscr (
+    @accountID userIdentifier,
+    @amount smallmoney,
+    @drain bit = 0,
+    @new bit = 0
+)
+AS
+BEGIN
+  DECLARE @aid userIdentifier
+  DECLARE @lastError int
+  DECLARE @diffFromGMT int
+  DECLARE @paymentDate VpTime
+  DECLARE @lastProcessed VpTime
+  DECLARE @paymentStatus tinyint
+  DECLARE @amt smallmoney
+  DECLARE @renewalDate VpTime
+  DECLARE @accountStatus tinyint
+  DECLARE @billingCycle tinyint
+  DECLARE @result int
+  DECLARE @newStatus tinyint
+  DECLARE @updateRequired bit
+
+  SELECT @result = 0
+  SELECT @updateRequired = 0	-- default: no need to update account status
+  
+  SELECT @paymentDate = getdate()
+
+  BEGIN TRAN
+    
+    SELECT @diffFromGMT = gmt
+      FROM getGMT
+    IF @diffFromGMT IS NULL
+      SELECT @diffFromGMT = 0
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN @lastError
+    END
+
+    SELECT @paymentDate = dateadd( hour, (-1) * @diffFromGMT, @paymentDate )
+
+    SELECT @aid = accountID,
+           @accountStatus = accountStatus,
+           @renewalDate = renewalDate,
+           @billingCycle = billingCycle,
+           @paymentStatus = paymentStatus
+      FROM userAccounts
+      WHERE accountID = @accountID
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    IF @accountID != @aid
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20001
+    END
+
+    /*
+     * If working with the monthly referral program, check to see
+     * if there are sufficient funds.
+     */
+    -- IF @new = 0
+    -- BEGIN
+      SELECT @amt = referral
+        FROM accountBalance
+        WHERE accountID = @accountID
+      
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+
+      IF @amt < @amount
+      BEGIN
+        /*
+         * If the 'use all available' flag is set and there is a
+         * non-zero amount available, use it all. Set the result
+         * code to indicate less that full amount was available.
+         */
+        IF @drain = 1 AND @amt > 0
+        BEGIN
+          SELECT @result = 20003
+          SELECT @amount = @amt
+        END
+        ELSE BEGIN
+          ROLLBACK TRAN 
+          RETURN 20002
+        END
+      END
+
+      UPDATE accountBalance
+        SET referral = referral - @amount
+        WHERE accountID = @accountID
+
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+    -- END
+
+    /* subscription balance is amount owed, so a payment
+       reduces it */
+    UPDATE accountBalance
+      SET subscription = subscription - @amount
+      WHERE accountID = @accountID
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+    
+    INSERT referralHistory
+      (accountID, processDate, amount, type)
+      VALUES (@aid, @paymentDate, 0 - @amount, @new)
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+    
+    IF @new = 0
+    BEGIN
+      INSERT payments
+        (accountID, paymentDate, amount, comment)
+        VALUES (@aid, @paymentDate, @amount, "Transfer from MONTHLY referral bonus")
+    END
+    ELSE BEGIN
+      INSERT payments
+        (accountID, paymentDate, amount, comment)
+        VALUES (@aid, @paymentDate, @amount, "Transfer from ONE-TIME referral bonus")
+    END
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    SELECT @amt = subscription
+      FROM accountBalance
+      WHERE accountID = @accountID
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+        
+    /* get the unique payment ID */
+    DECLARE @paymentID userIdentifier
+    SELECT @paymentID = @@identity
+
+    /*
+     * Update the running balance
+     */
+    DECLARE @bal int
+    SELECT @bal = 0 - @amt
+    INSERT runningBalance (paymentID, balance) VALUES (@paymentID, @bal)
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    /* if this payment is enough to clear the balance, set status OK */
+    IF ROUND(@amt,2) <= 0
+    BEGIN
+      UPDATE userAccounts
+        SET paymentStatus = 0
+        WHERE accountID = @accountID
+
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+
+      /* if account was suspended for non-payment, but payment 
+         was received, set accountStatus to OK
+
+         also update account status is account was new or pending
+      */
+      SELECT @updateRequired = 1
+      SELECT @newStatus = @accountStatus	-- default = same
+
+      IF @accountStatus = 5 OR @accountStatus = 1 OR @accountStatus = 2
+      BEGIN
+        SELECT @newStatus = 0
+
+        /* 
+           Update the renewal date if
+           - Account balance 0 or credit
+           - Account was New,Pending, or Overdue
+           - Renewal date is past
+        */
+        IF @paymentDate >= @renewalDate
+        BEGIN
+          SELECT @renewalDate = dateadd( month, @billingCycle, @renewalDate )
+          UPDATE userAccounts
+            SET renewalDate = @renewalDate
+            WHERE accountID = @accountID
+
+          SELECT @lastError = @@error
+          IF @lastError != 0
+          BEGIN
+            ROLLBACK TRAN
+            RETURN @lastError
+          END
+        END /* end, past renewal date */
+      END /* end, new, pending, or overdue */
+    END /* end, balance 0 or credit */
+
+  COMMIT TRAN
+
+  IF @updateRequired = 1
+  BEGIN
+    EXEC updateAccountStatus @accountID, @newStatus
+  END
+  
+  RETURN @result
+END
+GO

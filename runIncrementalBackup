@@ -1,0 +1,9 @@
+SYBASE=/u/vplaces/s/sybase
+export SYBASE
+for scriptFile in /u/vplaces/VPCOM/VPDB/vpdb.2.1.4.1-all/incrementBackup_*.sql
+{
+  echo 
+  echo
+  echo "running backup script" $scriptFile
+  /u/vplaces/s/sybase/bin/isql -Usa -PUBIQUE -SSYBASE -i $scriptFile
+}

@@ -1,0 +1,36 @@
+#!/bin/sh
+
+# This script adds new devices to the existing ones
+
+
+# PLEASE MAKE SURE THAT THIS FILE IS EXECUTABLE
+# BY USING chmod +x AFTER YOU SAVE IT
+
+SyBaseRoot=$1
+shift
+ServicesRoot=$1
+shift
+saLogin=$1
+shift
+saPassword=$1
+shift
+DataServer=$1
+
+SYBASE=$SyBaseRoot
+export SYBASE
+
+
+# MUST do this so create_db.sql file would be there
+echo GO > $ServicesRoot/create_db.sql
+echo   >> $ServicesRoot/create_db.sql
+
+# remove default and system segment from devices meant for user details
+echo removing sytem and default segment from device VpUserDetails
+echo
+$SyBaseRoot/bin/isql -U$saLogin -P$saPassword -S$DataServer << !
+USE vpusers
+GO
+EXEC sp_dropsegment "system", vpusers, VpUserDetails
+EXEC sp_dropsegment "default", vpusers, VpUserDetails
+GO
+!

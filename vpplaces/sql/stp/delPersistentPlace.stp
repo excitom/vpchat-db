@@ -1,0 +1,67 @@
+/* input:  URL
+   output: NONE
+*/
+CREATE PROC delPersistentPlace
+(
+  @URL	UrlType
+)
+AS
+BEGIN
+  DECLARE @diffFromGMT int
+  DECLARE @lastError int
+  DECLARE @canonicURL UrlType
+  DECLARE @existingURL UrlType
+
+  SELECT @canonicURL = lower(@URL)
+  
+  SELECT @diffFromGMT = gmt
+  FROM vpusers..getGMT
+  SELECT @lastError = @@error
+  IF @lastError != 0
+  BEGIN
+    RETURN @lastError
+  END
+
+  BEGIN TRAN
+    SELECT @existingURL = URL
+      FROM persistentPlaces
+      WHERE lower(URL) = @canonicURL
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    IF @existingURL IS NULL
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20001
+    END
+    
+    DELETE persistentPlaces
+      WHERE URL = @existingURL
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    /* add a delete change record */
+    INSERT persistentPlacesChange
+    VALUES(dateadd(hour, (-1) * @diffFromGMT, getdate()), @existingURL, "D")
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+  COMMIT TRAN  
+END
+GO
+GRANT EXECUTE ON delPersistentPlace TO vpusr
+GO

@@ -1,0 +1,131 @@
+/* --- add a warning for a user --- */
+/*
+  input : user nick name, reg.mode, content of warning,
+          nick name of person who issued the warning,
+          registration mode for that person,
+          comment regarding warning
+  output: return value - 0 - success
+                         20001 - tried to add warning to a user in
+                             local registration mode, but this user
+                             was not found in the local registration
+                         20002 - tried to add warning issued by a user in
+                             local registration mode, but that user
+                             was not found in the local registration
+*/
+CREATE PROC addWarning
+(
+@nickName VPuserID,
+@regMode VpRegMode,
+@content longName,
+@issuedBy VPuserID,
+@issuerRegMode VpRegMode,
+@comment longName,
+@allowAuxAsLocal bit = 0,
+@diffFromGMT int = NULL
+)
+AS
+BEGIN
+  /* turn all user ID to lower case, to get case insensitive comparisons */
+  SELECT @nickName = lower(@nickName)
+  SELECT @issuedBy = lower(@issuedBy)
+  
+  DECLARE @userID userIdentifier
+  DECLARE @issuerID userIdentifier
+  DECLARE @lastError int
+  DECLARE @retVal int
+  DECLARE @issueTime smalldatetime
+  
+  BEGIN TRAN
+    
+    IF @diffFromGMT IS NULL
+    BEGIN
+      SELECT @diffFromGMT = gmt
+      FROM getGMT
+      
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN addPenaltyToUser
+        RETURN @lastError
+      END
+      
+      IF @diffFromGMT IS NULL
+        SELECT @diffFromGMT = 0
+    END
+    
+    SELECT @issueTime = dateadd( hour, (-1) * @diffFromGMT, getdate() )
+    
+    EXEC @retVal = updateUser @userID OUTPUT, @nickName, @regMode, @allowAuxAsLocal
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+    
+    IF @userID = 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20001
+    END
+      
+    IF ( @retVal NOT IN ( 20001, 0 ) )
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @retVal
+    END
+    
+    EXEC @retVal = updateUser @issuerID OUTPUT, @issuedBy, @issuerRegMode, @allowAuxAsLocal
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+    
+    IF @issuerID = 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20002
+    END
+      
+    IF ( @retVal NOT IN ( 20001, 0 ) )
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @retVal
+    END
+    
+    INSERT INTO warnings
+        ( userID, content, issuedOn, issuedBy, comment )
+        values (
+          @userID,
+          @content,
+          @issueTime,
+          @issuerID,
+          @comment
+   	)
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    UPDATE users
+    SET warnings = warnings + 1
+    WHERE userID = @userID
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+    
+  COMMIT TRAN
+  
+END
+GO 

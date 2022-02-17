@@ -1,0 +1,782 @@
+/* add a new user account 
+
+   author: Tom Lang 10/2001
+
+   input:  userID of account owner, user's email address,
+	   account type, promo, billing cycle, unit cost, discount,
+	   number of names allowed for this account,
+	   referredByID (optional), referredBy (optional)
+   output: return value -
+           negative value - DB failure, 
+           0 - success,
+           20001 - exceeded number of permitted accounts per email
+           20002 - user name already in DB
+           20003 - user name is banned  
+           20004 - free trial, but billing cycle not 1 month
+   accountType:
+	0 = comp
+	1 = Basic
+	2 = Family
+	3 = Sybil
+	4 = Group
+   accountStatus:
+	0 = OK
+	1 = new
+	2 = pending
+	3 = closed
+	4 = suspended - penalty
+	5 = suspended - overdue
+   paymentStatus:
+	0 = OK
+	1 = unconfirmed
+	2 = delinquent
+	3 = waiting for check
+	4 = pending eCheck
+	5 = free trial
+   billingCycle:
+	months 
+   promo:
+	if non-zero, weeks of free time
+*/
+IF EXISTS (SELECT name FROM sysobjects WHERE name='registerNewAccount' AND type='P')
+ DROP PROC registerNewAccount
+GO
+CREATE PROC registerNewAccount
+( 
+  @nickName		VPuserID,
+  @email		longName,
+  @password		VPPassword,
+  @accountType		smallInt,
+  @promo		tinyInt,
+  @billingCycle		tinyInt,
+  @unitCost		smallmoney,
+  @discount		float,
+  @nameLimit		smallInt,
+  @referredByID		userIdentifier = 0,
+  @referredBy		longName = NULL,
+  @freeTrial            bit = 0
+)
+AS
+BEGIN
+  DECLARE @localMode integer
+  SELECT  @localMode = 2
+  DECLARE @accountStatus tinyInt
+  SELECT  @accountStatus = 1
+  DECLARE @paymentStatus tinyInt
+  DECLARE @enrolledReferrer bit
+  SELECT  @enrolledReferrer = 1		-- changed default 9/2003
+  DECLARE @diffFromGMT int
+  DECLARE @creationDate VpTime
+  DECLARE @renewalDate VpTime
+  DECLARE @lastError int
+  DECLARE @newUserID userIdentifier
+  DECLARE @accountsForEmail integer
+  DECLARE @accountsPermitted integer
+  DECLARE @buddyListName longName
+  DECLARE @subscription smallmoney
+
+  IF @freeTrial = 1
+  BEGIN
+    IF @billingCycle > 1
+    BEGIN
+      RETURN 20004
+    END
+    SELECT  @paymentStatus = 5
+  END
+  ELSE BEGIN
+    SELECT  @paymentStatus = 1
+  END
+
+  SELECT @newUserID = NULL
+  
+  /* turn all user ID to lower case, to get case insensitive comparisons */
+  SELECT @nickName = lower(@nickName)
+  SELECT @nickName = ltrim(@nickName)
+  SELECT @email = lower(@email)
+  SELECT @email = ltrim(@email)
+  IF @referredBy IS NOT NULL
+  BEGIN
+    SELECT @referredBy = lower(@referredBy)
+  END
+
+  BEGIN TRAN registerNewAccount
+    IF char_length(@nickName) = 0
+    BEGIN
+      /* empty name */
+      ROLLBACK TRAN registerNewAccount
+      RETURN 20003
+    END
+    
+    /*
+     * check if name is banned
+     * - check if the nickname matches a prefix in the bannedName filter
+     * - check if the nickname was explicitly banned (deadNames table)
+     */
+    IF EXISTS 
+      ( SELECT nickName FROM bannedNames 
+          WHERE substring( @nickName, 1, char_length(nickName) )= nickName )
+    BEGIN
+      ROLLBACK TRAN registerNewAccount
+      RETURN 20003
+    END
+      
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN registerNewAccount
+      RETURN @lastError
+    END
+
+    IF EXISTS 
+      ( SELECT nickName FROM deadNames 
+          WHERE @nickName = nickName)
+    BEGIN
+      ROLLBACK TRAN registerNewAccount
+      RETURN 20003
+    END
+      
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN registerNewAccount
+      RETURN @lastError
+    END
+    
+    /* flag - re-attempting a registration that did not complete */
+    DECLARE @redo bit
+    SELECT @redo = 0
+      
+    /*
+     * check if name already registered
+     */
+    IF EXISTS 
+      ( SELECT nickName 
+          FROM users
+          WHERE ( nickName = @nickName ) AND
+                ( registrationMode = 2 )     )
+    BEGIN
+
+      /*
+       * if this is a re-attempt of a new registration,
+       * allow it to proceed
+       */
+      SELECT @newUserID = userID
+      FROM   users,userAccounts
+      WHERE  nickName = @nickName
+      AND    email = @email
+      AND    accountStatus = 1
+      AND    userID = ownerID
+      AND    accountID = userID
+    
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN registerNewAccount
+        RETURN @lastError
+      END
+
+      /*
+       * sorry, didn't find account in NEW state
+       */
+      IF @newUserID = NULL
+      BEGIN
+        ROLLBACK TRAN registerNewAccount
+        RETURN 20002
+      END
+
+      /*
+       * If it's NEW but a payment is in progress, bail anyway.
+       */
+      DECLARE @ctr INT
+      SELECT  @ctr = 0
+      SELECT @ctr = @ctr + COUNT(paymentID) FROM heldPayments WHERE accountID = @newUserID
+      SELECT @ctr = @ctr + COUNT(paymentID) FROM payments WHERE accountID = @newUserID
+      IF @ctr > 0
+      BEGIN
+        ROLLBACK TRAN registerNewAccount
+        RETURN 20002
+      END
+
+      /*
+       * set flag: re-use existing table entries
+       */
+      SELECT @redo = 1
+
+      /*
+       * See if new referral info provided. Else use old.
+       */
+      IF (@referredByID = 0)
+      BEGIN
+        SELECT @referredByID = referredByID FROM userAccounts WHERE ownerID = @newUserID
+      END
+      IF (@referredBy IS NULL)
+      BEGIN
+        SELECT @referredBy = referredBy FROM userAccounts WHERE ownerID = @newUserID
+      END
+    
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN registerNewAccount
+        RETURN @lastError
+      END
+    END
+      
+    /*
+     * make sure the email address not already in use
+     * for a valid account. 
+     */
+    IF @redo = 0
+    BEGIN
+      SELECT @accountsPermitted = intValue
+        FROM configurationKeys
+        WHERE keyName = "maxAccountsPerEmail"
+    
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN registerNewAccount
+        RETURN @lastError
+      END
+    
+      /*
+       * see if email already used for an account
+       */
+      SELECT @accountsForEmail = count(*) 
+        FROM userAccounts
+        WHERE ( email = @email )
+    
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN registerNewAccount
+        RETURN @lastError
+      END
+
+      IF @accountsForEmail >= @accountsPermitted
+      BEGIN
+        /*
+         * we'll let this through if the email was only used once
+         * and that account is in the NEW state (meaning, this is 
+         * a re-try using same email but different nickname). we've
+         * already established that the nickname is unique and not
+         * banned.
+         */
+        IF @accountsForEmail = 1
+        BEGIN
+          SELECT @newUserID = ownerID
+          FROM   users,userAccounts
+          WHERE  email = @email
+          AND    accountStatus = 1
+          AND    userID = ownerID
+          AND    accountID = userID
+    
+          SELECT @lastError = @@error
+          IF @lastError != 0
+          BEGIN
+            ROLLBACK TRAN registerNewAccount
+            RETURN @lastError
+          END
+
+          /*
+           * sorry, didn't find account in NEW state
+           */
+          IF @newUserID = NULL
+          BEGIN
+            ROLLBACK TRAN registerNewAccount
+            RETURN 20001
+          END
+
+          /*
+           * update the nickname in the old users table entry. this is
+           * OK to do since the account is in NEW state - i.e. never used.
+           */
+          UPDATE users
+            SET nickName = @nickName, locked = 1
+            WHERE userID = @newUserID
+    
+          SELECT @lastError = @@error
+          IF @lastError != 0
+          BEGIN
+            ROLLBACK TRAN registerNewAccount
+            RETURN @lastError
+          END
+
+          /*
+           * set flag: re-use existing table entries
+           */
+          SELECT @redo = 1
+
+          /*
+           * See if new referral info provided. Else use old.
+           */
+          IF (@referredByID = 0)
+          BEGIN
+            SELECT @referredByID = referredByID FROM userAccounts WHERE ownerID = @newUserID
+          END
+          IF (@referredBy IS NULL)
+          BEGIN
+            SELECT @referredBy = referredBy FROM userAccounts WHERE ownerID = @newUserID
+          END
+    
+          SELECT @lastError = @@error
+          IF @lastError != 0
+          BEGIN
+            ROLLBACK TRAN registerNewAccount
+            RETURN @lastError
+          END
+          
+        END
+        ELSE BEGIN
+          ROLLBACK TRAN registerNewAccount
+          RETURN 20001
+        END
+      END
+    END
+    
+    /*
+     * get current time and date
+     */
+    SELECT @diffFromGMT = gmt
+      FROM getGMT
+    IF @diffFromGMT IS NULL
+      SELECT @diffFromGMT = 0
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN registerNewAccount
+      RETURN @lastError
+    END
+
+    SELECT @creationDate = dateadd( hour, (-1) * @diffFromGMT, getdate() )
+    SELECT @renewalDate  = dateadd( month, @billingCycle, @creationDate )
+    IF @promo > 0
+    BEGIN
+      /*
+       * For free trial, promo time is at the front. Otherwise it is
+       * tacked on to the end.
+       */
+      IF @freeTrial = 1
+      BEGIN
+        SELECT @renewalDate = dateadd( week, @promo, @creationDate )
+      END
+      ELSE BEGIN
+        SELECT @renewalDate = dateadd( week, @promo, @renewalDate )
+      END
+    END
+
+    IF @redo = 0
+    BEGIN
+
+      /*********** new registration **********/
+
+      /*
+       * create user table entry, which reserves the nickName 
+       * and gets a unique user ID
+       */
+      INSERT users (
+          nickName, registrationMode,
+          locked, restricted, penalties, warnings, ignores
+        )
+        VALUES (
+          @nickName, @localMode, 1, 0, 0, 0, 0
+        )
+        
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN registerNewAccount
+        RETURN @lastError
+      END
+        
+      /*
+       * get the unique user ID 
+       */
+      SELECT @newUserID = @@identity
+        
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN registerNewAccount
+        RETURN @lastError
+      END
+        
+      /*
+       * Create the registration table entry, tied to user table by the
+       * user ID. Also, the accountID will be the same as the userID. 
+       * The email ID in the registration table is the name used for the
+       * buddy list, which is not the input email (which is used for the
+       * userAccount table entry).
+       */
+
+      SELECT @buddyListName = @nickName + "@buddy"
+
+      INSERT INTO registration (
+          userID, email, password,
+          registrationDate, accountID
+        ) 
+        VALUES(
+          @newUserID, @buddyListName, @password,
+          @creationDate, @newUserID
+        )
+        
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN registerNewAccount
+        RETURN @lastError
+      END
+      
+      /*
+       * Create the userAccount table entry
+       */
+      INSERT userAccounts (
+          accountID, ownerID, accountType, accountStatus,
+          billingCycle, creationDate, renewalDate, lastUpdated,
+          nameLimit, referredByID, referredBy, enrolledReferrer,
+          discount, paymentStatus, unitCost, email
+        )
+        VALUES (
+          @newUserID, @newUserID, @accountType, @accountStatus,
+          @billingCycle, @creationDate, @renewalDate, NULL,
+          @nameLimit, @referredByID, @referredBy, @enrolledReferrer,
+          @discount, @paymentStatus, @unitCost, @email
+        )
+        
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN registerNewAccount
+        RETURN @lastError
+      END
+
+      /*
+       * initialize the account balance 
+       */
+      SELECT @subscription = @unitCost * @billingCycle - (@unitCost * @billingCycle * @discount)
+      INSERT accountBalance (accountID, subscription, referral) 
+        VALUES (@newUserID, @subscription, 0)
+        
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN registerNewAccount
+        RETURN @lastError
+      END
+
+      /*
+       * Initialize renewal stats
+       */
+      INSERT renewals (accountID, freeTrial, oldAcct, months, renewals, wentOverdue, upgrades, goodChecks, badChecks, namesAdded, chargebacks)
+        VALUES (@newUserID, @freeTrial, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+        
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN registerNewAccount
+        RETURN @lastError
+      END
+    END
+
+    /************** registration re-attempt *************/
+
+    ELSE
+    BEGIN
+      /*
+       * assume users table entry already exists with proper nickName
+       */
+
+      SELECT @buddyListName = @nickName + "@buddy"
+
+      /*
+       * assume registration table entry exists,
+       * update potentially changed fields
+       */
+      UPDATE registration
+        SET email = @buddyListName,
+            password = @password,
+            registrationDate = @creationDate
+        WHERE userID = @newUserID
+        
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN registerNewAccount
+        RETURN @lastError
+      END
+      
+      /*
+       * assume userAccounts table entry exists,
+       * update potentially changed fields
+       */
+      UPDATE userAccounts
+        SET accountType = @accountType,
+            accountStatus = @accountStatus,
+            billingCycle = @billingCycle,
+            creationDate = @creationDate,
+            renewalDate = @renewalDate,
+            lastUpdated = NULL,
+            nameLimit = @nameLimit,
+            referredByID = @referredByID,
+            referredBy = @referredBy,
+            enrolledReferrer = @enrolledReferrer,
+            discount = @discount,
+            paymentStatus = @paymentStatus,
+            unitCost = @unitCost
+        WHERE accountID = @newUserID
+        
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN registerNewAccount
+        RETURN @lastError
+      END
+
+      /*
+       * assume accountBalance table entry exists,
+       * update potentially changed fields
+       */
+      SELECT @subscription = @unitCost * @billingCycle - (@unitCost * @billingCycle * @discount)
+      UPDATE accountBalance
+        SET subscription = @subscription,
+            referral = 0
+        WHERE accountID = @newUserID
+        
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN registerNewAccount
+        RETURN @lastError
+      END
+
+      /*
+       * assume renewal stats table entry exists,
+       * update potentially changed field
+       */
+      UPDATE renewals
+        SET freeTrial = @freeTrial
+        WHERE accountID = @newUserID
+        
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN registerNewAccount
+        RETURN @lastError
+      END
+    END
+
+    /*
+     * send userID / accountID to output
+     */
+    SELECT @newUserID AS userID
+  COMMIT TRAN registerNewAccount
+
+  BEGIN TRAN
+    /*
+     * Update/insert referral information
+     */
+    DECLARE @referralType tinyint
+
+    IF @referredByID != 0
+    BEGIN
+      IF EXISTS (SELECT * FROM userAccounts WHERE accountID = @referredByID)
+      BEGIN
+
+        SELECT @referralType = type 
+          FROM referralPrefs
+          WHERE accountID = @referredByID
+
+        SELECT @lastError = @@error
+        IF @lastError != 0
+        BEGIN
+          ROLLBACK TRAN 
+          RETURN 0	-- failure to update referrals does not negate 
+			-- the new user registration
+        END
+
+        IF @referralType IS NULL
+        BEGIN
+          -- SELECT @referralType = 255	-- unenrolled referrer
+          SELECT @referralType = 1	-- default: 1-time pmt
+        END
+
+        IF EXISTS (SELECT * FROM referrals WHERE accountID = @newUserID)
+        BEGIN
+          UPDATE referrals
+            SET referredByID = @referredByID,
+                type = @referralType
+            WHERE accountID = @newUserID
+        END
+        ELSE BEGIN
+          INSERT INTO referrals
+            (accountID, referredByID, type)
+            VALUES (@newUserID, @referredByID, @referralType)
+        END
+      
+        SELECT @lastError = @@error
+        IF @lastError != 0
+        BEGIN
+          ROLLBACK TRAN 
+          RETURN 0	-- failure to update referrals does not negate 
+			-- the new user registration
+        END
+      END
+    END
+    /*
+     * If there wasn't an explicit referral by ID, but there is a
+     * referral name, try to find the account ID for that name.
+     * Note: accountID = 0 means deleted name.
+     */
+    ELSE BEGIN
+      IF @referredBy IS NOT NULL
+      BEGIN
+        SELECT @referredByID = accountID
+          FROM users,registration
+          WHERE nickName = @referredBy
+          AND registration.userID = users.userID
+          AND accountID != 0
+
+        SELECT @lastError = @@error
+        IF @lastError != 0
+        BEGIN
+          ROLLBACK TRAN 
+          RETURN 0	-- failure to update referrals does not negate 
+			-- the new user registration
+        END
+
+        IF @referredByID IS NOT NULL AND @referredByID != 0
+        BEGIN
+
+          UPDATE userAccounts 
+            SET referredByID = @referredByID
+            WHERE accountID = @newUserID
+
+          SELECT @lastError = @@error
+          IF @lastError != 0
+          BEGIN
+            ROLLBACK TRAN 
+            RETURN 0	-- failure to update referrals does not negate 
+			-- the new user registration
+          END
+
+          SELECT @referralType = type 
+            FROM referralPrefs
+            WHERE accountID = @referredByID
+
+          SELECT @lastError = @@error
+          IF @lastError != 0
+          BEGIN
+            ROLLBACK TRAN 
+            RETURN 0	-- failure to update referrals does not negate 
+			-- the new user registration
+          END
+
+          IF @referralType IS NULL
+          BEGIN
+            -- SELECT @referralType = 255	-- unenrolled referrer
+            SELECT @referralType = 1		-- default: 1-time pmt
+          END
+
+          IF EXISTS (SELECT * FROM referrals WHERE accountID = @newUserID)
+          BEGIN
+            UPDATE referrals
+              SET referredByID = @referredByID,
+                  type = @referralType
+              WHERE accountID = @newUserID
+          END
+          ELSE BEGIN
+            INSERT INTO referrals
+              (accountID, referredByID, type)
+              VALUES (@newUserID, @referredByID, @referralType)
+          END
+      
+          SELECT @lastError = @@error
+          IF @lastError != 0
+          BEGIN
+            ROLLBACK TRAN 
+            RETURN 0	-- failure to update referrals does not negate 
+			-- the new user registration
+          END
+        END	-- end, referral by name
+
+        /*
+         * If no explicit referral by ID or name, see if this
+         * email received an invitation. Give referral credit if so.
+         */
+        ELSE BEGIN
+          SELECT @referredByID = referredByID
+            FROM invitations
+            WHERE email = @email
+            AND accountID IS NULL	-- only give credit once
+      
+          SELECT @lastError = @@error
+          IF @lastError != 0
+          BEGIN
+            ROLLBACK TRAN 
+            RETURN 0	-- failure to update referrals does not negate 
+			  -- the new user registration
+          END
+
+          IF @referredByID IS NOT NULL
+          BEGIN
+            IF EXISTS (SELECT * FROM referrals WHERE accountID = @newUserID)
+            BEGIN
+              UPDATE referrals
+                SET referredByID = @referredByID,
+                    type = 1
+                WHERE accountID = @newUserID
+            END
+            ELSE BEGIN
+              INSERT INTO referrals
+                (accountID, referredByID, type)
+                VALUES (@newUserID, @referredByID, 1)
+            END
+      
+            SELECT @lastError = @@error
+            IF @lastError != 0
+            BEGIN
+              ROLLBACK TRAN 
+              RETURN 0	-- failure to update referrals does not negate 
+			    -- the new user registration
+            END
+          END
+        END
+      END
+    END
+
+    /*
+     * update invitation record, if any
+     */
+    IF EXISTS (
+     SELECT * FROM invitations WHERE email = @email AND accountID IS NULL)
+    BEGIN
+      UPDATE invitations SET accountID = @newUserID WHERE email = @email
+    END
+
+  COMMIT TRAN
+
+  /*
+   * Grant the account owner some freebie points
+   * Note: The UPDATE case handles a person who converts a name
+   * into an account owner.
+   */
+  IF EXISTS (SELECT * FROM userPoints WHERE userID = @newUserID)
+  BEGIN
+    UPDATE userPoints
+      SET points = points + (@nameLimit * 500)
+      WHERE userID = @newUserID
+  END
+  ELSE BEGIN
+    INSERT userPoints (userID, points)
+      VALUES (@newUserID, (@nameLimit * 500))
+  END
+
+  /*
+   * add history record
+   */
+  EXEC addAcctHistory @newUserID, 1, @redo
+
+  RETURN 0
+END
+GO 

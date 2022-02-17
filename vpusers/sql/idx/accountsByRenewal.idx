@@ -1,0 +1,4 @@
+/* index user accounts by who account status and renewal date */
+create index accountsByRenewalIdx
+on userAccounts ( renewalDate, accountStatus )
+GO

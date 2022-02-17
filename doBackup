@@ -1,0 +1,50 @@
+#!/bin/sh
+
+# This script does the actual running of backup scripts
+
+ServicesRoot=$1
+shift
+FullOrIncremental=$1
+shift
+IntervalType=$1
+
+echo doing backup of Virtual Places databases
+echo backup type \(Full/Incremental\) : $FullOrIncremental
+echo Interval Type \(Day/Week/Month\) : $IntervalType
+  
+# get parameters from backupData.txt
+SybaseRoot=`grep SybaseRoot $ServicesRoot/backupData.txt | cut -d" " -f2`
+DbLoginName=`grep DbLoginName $ServicesRoot/backupData.txt | cut -d" " -f2`
+DbLoginPassword=`grep DbLoginPassword $ServicesRoot/backupData.txt | cut -d" " -f2`
+backupPlan=`grep backupPlan $ServicesRoot/backupData.txt | cut -d" " -f2`
+
+if [ $IntervalType = "W" ]
+then
+  intervalLetter="a"
+else
+  intervalLetter="e"
+fi
+
+SYBASE=$SybaseRoot
+export SYBASE
+
+# see if this is a day for a full backup
+if [ $backupPlan = "F" ] || [ $IntervalType = "D" ] || [ `date +%$intervalLetter` = "$fullBackupDay" ] 
+then 
+  $ServicesRoot/runFullBackup
+else
+  $ServicesRoot/runIncrementalBackup
+fi
+
+# make sure backup copies are numbered correctly,
+# with no more the allowed number of copies 
+# kept on the disk
+$ServicesRoot/manageBackupCopies $ServicesRoot
+
+# hold for a minute before calling runBackup
+# so if the whole process takes less than a minute 
+# we don't get an error message "at: too late"
+sleep 60
+
+$ServicesRoot/runBackup $ServicesRoot
+

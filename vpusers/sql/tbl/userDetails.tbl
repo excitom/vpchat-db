@@ -1,0 +1,22 @@
+CREATE TABLE userDetails
+(
+	userID			userIdentifier			NOT NULL
+                        	CONSTRAINT userDetailsIDisPrimary PRIMARY KEY
+                        	CONSTRAINT userDetailRefToUsers REFERENCES users,
+	firstName		varchar(30)			NOT NULL,
+	lastName		varchar(50)			NOT NULL,
+	address			varchar(50)			NULL,
+	city			varchar(30)			NULL,
+	state			varchar(30)			NULL,
+	country			char(2)				NULL,
+	zipcode			varchar(25)			NULL,
+	hobbies			varchar(60)			NULL,
+	occupation		varchar(60)			NULL,
+	personalQuote		varchar(60)			NULL,
+  	location		varchar(60)			NULL,
+  	email			varchar(60)			NULL,
+	age			tinyInt 			NULL,
+	gender			tinyInt				NULL,
+)
+ON userDetailsSeg
+GO

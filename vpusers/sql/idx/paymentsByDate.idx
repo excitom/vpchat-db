@@ -1,0 +1,4 @@
+/* index payments by date paid */
+create index paymentsByDateIdx
+on payments ( paymentDate )
+GO

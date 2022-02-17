@@ -1,0 +1,111 @@
+/* add/subtract reward points for a user name.
+ * input is user name 
+ * and +/- point delta.
+ *
+ * output: Return value - 0 - success 
+ *                        20001 - No such user name
+ */
+IF EXISTS
+ (SELECT name FROM sysobjects WHERE name = 'updateUserPointsByName' AND type = 'P') 
+ DROP PROC updateUserPointsByName
+GO  
+CREATE PROC updateUserPointsByName (
+    @nickName	VPuserID,
+    @points	int,
+    @delta	bit=1		-- input is +/- delta or absolute
+)
+AS
+BEGIN
+  DECLARE @userID userIdentifier
+  DECLARE @lastError int
+  DECLARE @prev int
+
+  BEGIN TRAN
+    
+    SELECT @userID = userID FROM users WHERE nickName = @nickName
+    IF @@rowcount = 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20001
+    END
+
+    IF @points = 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 0
+    END
+
+    /* credit transaction */
+
+    IF @points > 0
+    BEGIN
+      IF EXISTS (SELECT * FROM userPoints WHERE userID = @userID)
+      BEGIN
+        IF @delta = 1
+        BEGIN
+          UPDATE userPoints SET points = points + @points
+            WHERE userID = @userID
+        END
+        ELSE BEGIN
+          UPDATE userPoints SET points = @points
+            WHERE userID = @userID
+        END
+      END
+      ELSE BEGIN
+        INSERT userPoints (userID, points)
+          VALUES(@userID, @points)
+      END
+    END
+
+    /* debit transaction */
+
+    ELSE BEGIN
+      DECLARE @balance integer
+      SELECT @balance = NULL
+      SELECT @balance = points FROM userPoints WHERE userID = @userID
+      IF @balance IS NULL OR @balance < abs(@points)
+      BEGIN
+        /* nested transaction kludge. we really should rollback, but to
+         * avoid having the calling proc throw an error due to unbalanced
+         * transaction count, do a commit here instead. we haven't changed
+         * anything yet so a commit is just an expensive no-op.
+         */
+        IF @@trancount > 1
+          COMMIT TRAN
+        ELSE
+          ROLLBACK TRAN
+        RETURN 20002
+      END
+      IF @delta = 1
+      BEGIN
+        UPDATE userPoints SET points = points + @points
+          WHERE userID = @userID
+      END
+      ELSE BEGIN
+        UPDATE userPoints SET points = @points
+          WHERE userID = @userID
+      END
+    END
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      IF @@trancount = 1
+        ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+  COMMIT TRAN
+
+  IF @delta = 1
+    EXEC addAcctHistory @userID, 80, @points
+  ELSE
+    EXEC addAcctHistory @userID, 81, @points
+
+END
+GO
+IF OBJECT_ID('dbo.updateUserPointsByName') IS NOT NULL
+        PRINT '<<< CREATED PROCEDURE dbo.updateUserPointsByName >>>'
+ELSE
+        PRINT '<<< FAILED CREATING PROCEDURE dbo.updateUserPointsByName >>>'
+GO

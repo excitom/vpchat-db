@@ -1,0 +1,106 @@
+/* --- add a privilege for a user --- */
+/*
+  input: user nick name, re. mode, privilege type
+  output: return value - 0 - success
+                         20001 - privlege was already given
+                         20002 - privilege type does not exist
+                         20003 - tried to add privilege to a user in
+                             local registration mode, but this user
+                             was not found in the local registration
+*/
+CREATE PROC addPrivilege
+(
+@nickName VPuserID,
+@regMode VpRegMode,
+@privilegeType privType
+)
+AS
+BEGIN
+  DECLARE @userID userIdentifier
+  DECLARE @lastError int
+  DECLARE @retVal int
+  
+  /* turn all user ID to lower case, to get case insensitive comparisons */
+  SELECT @nickName = lower(@nickName)
+  
+  BEGIN TRAN addPrivilege
+    
+    /* check if privilege type exists */
+    IF EXISTS ( 
+      SELECT privilegeType FROM privilegeTypes 
+        WHERE privilegeType=@privilegeType )
+    BEGIN
+      
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN addPrivilege
+        RETURN @lastError
+      END
+      
+      /* get user ID, or create an entry
+         for this user if none exists yet */
+      EXEC @retVal = updateUser @userID OUTPUT, @nickName, @regMode
+      
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN addPrivilege
+        RETURN @lastError
+      END
+      
+      IF @userID = 0
+      BEGIN
+        /* tried to add privilege to a user in
+           local registration mode, but this user
+           was not found in the local registration */
+        ROLLBACK TRAN addPrivilege
+        RETURN 20003
+      END
+      
+      IF ( @retVal NOT IN ( 20001, 0 ) )
+      BEGIN
+        ROLLBACK TRAN addPrivilege
+        RETURN @retVal
+      END
+      
+      /* check if this privilege was 
+         already given for this user */
+      IF EXISTS (
+        SELECT userID FROM userPrivileges
+          WHERE userID = @userID AND
+                privilegeType = @privilegeType )
+      BEGIN
+        /* don't insert same privilege twice */
+        ROLLBACK TRAN addPrivilege
+        RETURN 20001
+      END
+      
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN addPrivilege
+        RETURN @lastError
+      END
+      
+      INSERT INTO userPrivileges
+        ( userID, privilegeType )
+        VALUES ( @userID, @privilegeType )
+    END
+    ELSE BEGIN
+      /* privilege type does not exist */
+      ROLLBACK TRAN addPrivilege
+      RETURN 20002
+    END
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN addPrivilege
+      RETURN @lastError
+    END
+    
+  COMMIT TRAN addPrivilege
+  
+END
+GO 

@@ -1,0 +1,22 @@
+/* Clear from database all records for placeusage
+	that are @keppdays ago or older */
+/* input:  
+     number of days back to keep
+   output: None */
+
+CREATE PROC cleanPlaceUsage
+(
+  @keepDays   smallint
+)
+AS
+BEGIN
+  DECLARE @lastDay VpTime
+
+  SELECT @lastDay = dateadd( day, @keepDays  * -1, getdate() )
+  
+  DELETE
+  FROM placeUsage
+  WHERE time < @lastDay
+
+END
+GO

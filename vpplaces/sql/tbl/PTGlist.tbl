@@ -1,0 +1,10 @@
+CREATE TABLE PTGlist
+(
+	serialNumber	integer				NOT NULL
+			constraint isPrimary primary key,
+	URL		varchar(255)			NOT NULL,
+	title		varchar(255)			NOT NULL,
+        roomUsage       integer,
+        corrUsage       integer
+)
+GO

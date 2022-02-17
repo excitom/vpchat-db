@@ -1,0 +1,25 @@
+/*
+ * People allowed to send to notify lists
+ *
+ * Access to lists may be managed on a per-account basis or per-user basis.
+ *
+ * A maximum number of messages may be sent to the list per period,
+ * per account. The sendCount tracks messages sent in this period.
+ */
+CREATE TABLE notifyAccessList
+(
+	accountID	userIdentifier		NOT NULL,
+	userID		userIdentifier		NOT NULL,
+	notifyID	userIdentifier		NOT NULL,
+	locked		bit			NOT NULL,
+	maxMsgs		smallint		NOT NULL,
+	msgInterval	smallint		NOT NULL,
+	msgCount	int			NOT NULL,
+	accessPriv	tinyint			NOT NULL
+			-- 1 = send alerts
+			-- 2 = send ladder email
+			-- 4 = schedule tournaments
+			-- 8 = update ladder notices
+			-- 16 = update ladder/tournament results
+)
+GO

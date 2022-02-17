@@ -1,0 +1,274 @@
+/*
+ * User joins a game ladder
+ *
+ * Input: List ID, userID
+ *
+ * Output: 0 = success
+ *         2 = success, pending private list owner approval
+ *         3 = success, existing pending request updated
+ *         20000 = list not found 
+ *         20001 = list is deleted
+ *         20002 = list is locked
+ *         20003 = user not found 
+ *         20004 = ladder is closed
+ *         20005 = ladder is full
+ *         20006 = user is already in another ladder for this game type
+ */
+CREATE PROC joinGameLadder (
+	@notifyID	userIdentifier,
+	@userID		userIdentifier,
+	@email		longName
+)
+AS
+BEGIN
+  DECLARE @lastError	int
+  DECLARE @rc		int
+  DECLARE @maxPlayers	int
+  DECLARE @num		int
+  DECLARE @gameTypeID	int
+  DECLARE @locked	bit
+  DECLARE @deleted	bit
+  DECLARE @approvalRqd	bit
+  DECLARE @closed	bit
+  DECLARE @type		int
+  DECLARE @diffFromGMT 	int
+  DECLARE @now    	VpTime
+  DECLARE @nickName	VPuserID
+  SELECT  @approvalRqd = 0
+
+  SELECT @diffFromGMT = gmt
+    FROM vpusers..getGMT
+  IF @diffFromGMT IS NULL
+    SELECT @diffFromGMT = 0
+  SELECT @now = dateadd( hour, (-1) * @diffFromGMT, getdate() )
+
+  SELECT @email = ltrim(rtrim(@email))
+
+  BEGIN TRAN
+    SELECT @type = type,
+	   @locked = locked,
+	   @deleted = deleted,
+	   @maxPlayers = maxPlayers,
+	   @closed = closed,
+	   @gameTypeID = gameTypeID
+    FROM notifyLists, ladders
+    WHERE notifyLists.notifyID = @notifyID
+    AND   notifyLists.notifyID = ladders.notifyID
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    IF @type IS NULL
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20000
+    END
+
+    IF @locked = 1
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20002
+    END
+
+    IF @deleted = 1
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20001
+    END
+
+    IF @closed = 1
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20004
+    END
+
+    IF EXISTS (SELECT * FROM ladderMembers m, ladders l
+		WHERE userID = @userID
+		AND m.notifyID = l.notifyID
+		AND m.pending = 0
+		AND gameTypeID = @gameTypeID)
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20006
+    END
+
+    IF @maxPlayers > 0 
+    BEGIN
+      SELECT @num = COUNT(userID)
+	FROM ladderMembers
+	WHERE notifyID = @notifyID
+	AND pending = 0
+    
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+
+      IF @num >= @maxPlayers
+      BEGIN
+        ROLLBACK TRAN
+        RETURN 20005
+      END
+    END
+
+    SELECT @nickName = NULL
+    SELECT @nickName = nickName
+      FROM vpusers..users
+      WHERE userID = @userID
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    IF @nickName IS NULL
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20003
+    END
+
+    IF EXISTS (SELECT * FROM notifySubscrs WHERE userID = @userID AND notifyID = @notifyID)
+    BEGIN
+      UPDATE notifySubscrs
+        SET  notifyPref = 15
+        WHERE userID = @userID AND notifyID = @notifyID
+  
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+
+      SELECT @rc = 1
+    END
+    ELSE BEGIN
+
+      SELECT @approvalRqd = approvalRqd
+        FROM privateLists
+        WHERE notifyID = @notifyID
+  
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+
+
+      IF @approvalRqd = 1
+      BEGIN
+        IF EXISTS (SELECT * FROM pendingListSubscrs WHERE userID = @userID AND notifyID = @notifyID)
+        BEGIN
+          SELECT @rc = 3
+          UPDATE pendingListSubscrs
+            SET notifyPref = 15,
+                requestDate = @now
+          WHERE notifyID = @notifyID
+          AND userID = @userID
+        END
+        ELSE BEGIN
+          SELECT @rc = 2
+          INSERT pendingListSubscrs (notifyID, userID, notifyPref, requestDate)
+            VALUES(@notifyID, @userID, 15, @now)
+        END
+      END
+      ELSE BEGIN
+        SELECT @rc = 0
+        INSERT notifySubscrs (notifyID, userID, notifyPref)
+          VALUES(@notifyID, @userID, 15)
+      END
+
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+    END
+
+    IF EXISTS( SELECT * FROM ladderMembers 
+    		WHERE notifyID = @notifyID AND userID = @userID)
+    BEGIN
+      UPDATE ladderMembers SET pending = @approvalRqd, rank = 0, email = @email
+    		WHERE notifyID = @notifyID AND userID = @userID
+    END
+    ELSE BEGIN
+      INSERT ladderMembers
+		(notifyID, userID, rank, joinedDate, won, lost, tied, pending, email)
+ 		VALUES(@notifyID, @userID, 0, @now, 0, 0, 0, @approvalRqd, @email)
+    END
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    /*
+     * If this is a "notify on join list" then
+     * schedule an event.
+     */
+    IF @type & 0x80 = 0x80
+    BEGIN
+      IF NOT EXISTS (
+        SELECT * FROM notifySubscrHistory
+          WHERE notifyID = @notifyID
+          AND     userID = @userID
+      )
+      BEGIN
+        SELECT @diffFromGMT = gmt
+          FROM vpusers..getGMT
+        IF @diffFromGMT IS NULL
+          SELECT @diffFromGMT = 0
+    
+        SELECT @lastError = @@error
+        IF @lastError != 0
+        BEGIN
+          ROLLBACK TRAN
+          RETURN @lastError
+        END
+        SELECT @now = dateadd( hour, (-1) * @diffFromGMT, getdate() )
+
+        INSERT notifySubscrHistory (notifyID, userID, subscrTime)
+          VALUES (@notifyID, @userID, @now)
+
+        DECLARE @message longName
+        SELECT @message = @nickName + ' has joined.'
+    
+        INSERT notifyEvents (notifyID, userID, accountID, time, message)
+          VALUES (@notifyID, @userID, 1, @now, @message)
+
+        SELECT @lastError = @@error
+        IF @lastError != 0
+        BEGIN
+          ROLLBACK TRAN
+          RETURN @lastError
+        END
+      END
+    END
+
+  COMMIT TRAN
+
+  DECLARE @accountID userIdentifier
+  SELECT  @accountID = accountID
+    FROM vpusers..registration
+    WHERE userID = @userID
+
+  IF @userID IS NOT NULL
+  BEGIN
+    EXEC vpusers..addAcctHistory @accountID, 66, @notifyID
+  END
+
+  RETURN @rc
+END
+GO

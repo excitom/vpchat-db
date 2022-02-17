@@ -1,0 +1,10 @@
+CREATE TABLE voteOptions
+(
+	voteID		numeric(10,0)			NOT NULL,
+	optionID	numeric(2,0)			NOT NULL,
+	label		varchar(10)			NOT NULL,
+	description	varchar(50)			NULL,
+	totalSelections integer		                NULL,
+		PRIMARY KEY ( voteID, optionID )
+)
+GO

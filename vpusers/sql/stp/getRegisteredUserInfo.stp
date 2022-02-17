@@ -1,0 +1,86 @@
+/* get all the information on one user, by name */
+/* input:  user nick name
+   output: 3 result sets -
+           * 1 row with email, registration date,
+             last sign on date and delete date (may be null)
+           * privileges for this user
+           * active penalties for this user
+           return value - 0 if successfull
+                          20001 if no such nick name is registered
+*/
+CREATE PROC getRegisteredUserInfo ( @nickName VPuserID )
+AS
+BEGIN
+  --  set isolation level to 0
+  set transaction isolation level 0
+
+  SELECT @nickName = lower(@nickName)
+ 
+  DECLARE @lastError int
+  DECLARE @userID userIdentifier
+  BEGIN TRAN getRegisteredUserInfo
+    SELECT @userID = userID
+      FROM users
+      WHERE nickName = @nickName AND
+            registrationMode = 2
+    
+    SELECT @lastError = @@error
+    IF @lastError !=0
+    BEGIN
+      ROLLBACK TRAN getRegisteredUserInfo
+      RETURN @lastError
+    END
+    
+    IF @userID IS NULL
+    BEGIN
+      ROLLBACK TRAN getRegisteredUserInfo
+      RETURN 20001
+    END
+    
+    /* show user's registration details */
+    SELECT email, registrationDate, lastSignOnDate, deleteDate
+      FROM registration
+      WHERE userID = @userID
+    
+    SELECT @lastError = @@error
+    IF @lastError !=0
+    BEGIN
+      ROLLBACK TRAN getRegisteredUserInfo
+      RETURN @lastError
+    END
+    
+    /* show user's privileges */
+    SELECT description
+      FROM userPrivileges, privilegeTypes
+      WHERE userID = @userID AND
+            userPrivileges.privilegeType = privilegeTypes.privilegeType
+    
+    SELECT @lastError = @@error
+    IF @lastError !=0
+    BEGIN
+      ROLLBACK TRAN getRegisteredUserInfo
+      RETURN @lastError
+    END
+    
+    /* show user's penalties */
+    SELECT description AS Penalty,
+           issuedOn,
+           u1.nickName AS issuer,
+           u1.registrationMode AS issuerMode,
+           forgiven,
+           expiresOn
+    FROM penalties, penaltyTypes, users u1
+  WHERE penalties.penaltyType = penaltyTypes.penaltyType AND
+        penalties.userID = @userID AND
+        penalties.issuedBy = u1.userID
+    
+    SELECT @lastError = @@error
+    IF @lastError !=0
+    BEGIN
+      ROLLBACK TRAN getRegisteredUserInfo
+      RETURN @lastError
+    END
+    
+  COMMIT TRAN getRegisteredUserInfo
+END
+GO

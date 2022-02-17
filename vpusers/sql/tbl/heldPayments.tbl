@@ -1,0 +1,29 @@
+/*
+ * This table augments the information in the payments table, when
+ * there is an eCheck payment that is held until the check clears.
+ */
+CREATE TABLE heldPayments
+(
+	paymentID	userIdentifier			IDENTITY
+                        	constraint isPrimary primary key,
+	accountID	userIdentifier			NOT NULL,
+	paymentDate	VpTime				NOT NULL,
+	amount		smallmoney			NOT NULL,
+	AVS_result	varchar(10)			NOT NULL,
+	shopperID	varchar(42)			NOT NULL,
+	orderID		varchar(10)			NOT NULL,
+	approvalCode	varchar(6)			NOT NULL,
+	status		tinyint				NOT NULL,
+	-- 0 = pending
+	-- 1 = cleared (should be an entry in payments table now)
+	-- 2 = rejected
+	-- 3 = completed free trial (will be in payments tbl too)
+	-- 4 = cancelled free trial
+	comment		longName			NULL,
+	pmtType		tinyint				NULL,
+	-- 1 = paypal (funded via echeck)
+	-- 2 = credit card (free trial)
+	-- 3 = echeck
+	ccID		userIdentifier			NULL
+)
+GO

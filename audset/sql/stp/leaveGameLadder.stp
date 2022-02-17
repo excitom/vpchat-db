@@ -1,0 +1,162 @@
+/*
+ * Remove a user from a game ladder
+ *
+ * Input: List ID, userID
+ *
+ * Output: 0 = success
+ *         20000 = list not found 
+ *         20003 = user not found 
+ */
+IF EXISTS
+ (SELECT name FROM sysobjects WHERE name = 'leaveGameLadder' AND type = 'P')
+  DROP PROC leaveGameLadder
+GO
+CREATE PROC leaveGameLadder (
+	@notifyID	userIdentifier,
+	@userID		userIdentifier
+)
+AS
+BEGIN
+  DECLARE @lastError	int
+  DECLARE @locked	bit
+  DECLARE @deleted	bit
+  DECLARE @tournID	userIdentifier
+  DECLARE @status	tinyint
+
+  IF NOT EXISTS (SELECT * FROM notifyLists WHERE notifyID = @notifyID)
+  OR NOT EXISTS (SELECT * FROM ladders     WHERE notifyID = @notifyID)
+  BEGIN
+    RETURN 20000
+  END
+
+  IF NOT EXISTS
+   (SELECT * FROM notifySubscrs WHERE userID = @userID AND notifyID = @notifyID)
+  AND NOT EXISTS
+   (SELECT * FROM pendingListSubscrs WHERE userID = @userID AND notifyID = @notifyID)
+  BEGIN
+    RETURN 20003
+  END
+
+  SELECT @lastError = @@error
+  IF @lastError != 0
+  BEGIN
+    ROLLBACK TRAN
+    RETURN @lastError
+  END
+
+  DECLARE tourneyCursor CURSOR FOR
+    SELECT tournID, status FROM tournaments
+      WHERE notifyID = @notifyID
+
+  /*
+   * Resign from any tournaments associated with this ladder,
+   * as long as the tournament is still open for registration.
+   *
+   * Ideally, this loop would be in the transaction in case it
+   * is not possible to resign from all tournaments. However,
+   * delPlayer potentially has to update the users database to 
+   * refund entry fees so it's not a good idea to nest this 
+   * transaction.
+   */
+  OPEN tourneyCursor
+  FETCH tourneyCursor INTO @tournID, @status
+  WHILE (@@sqlstatus = 0)
+  BEGIN
+    IF EXISTS (SELECT * FROM tournamentPlayers
+                 WHERE tournID = @tournID AND userID = @userID)
+    BEGIN
+      IF NOT (@status = 0x01 OR @status = 0x04 OR @status = 0x08)
+      BEGIN
+        ROLLBACK TRAN
+        RETURN 20002
+      END
+
+      EXEC  delPlayer @userID, @tournID
+    END
+
+    FETCH tourneyCursor INTO @tournID, @status
+  END
+  CLOSE tourneyCursor
+
+  BEGIN TRAN
+
+    IF EXISTS (SELECT * FROM notifySubscrs WHERE userID = @userID AND notifyID = @notifyID)
+    BEGIN
+
+      DELETE notifySubscrs WHERE userID = @userID AND notifyID = @notifyID
+    END
+    ELSE IF EXISTS (SELECT * FROM pendingListSubscrs WHERE userID = @userID AND notifyID = @notifyID)
+    BEGIN
+      DELETE pendingListSubscrs WHERE userID = @userID AND notifyID = @notifyID
+    END
+    ELSE BEGIN
+      ROLLBACK TRAN
+      RETURN 20003
+    END
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    IF EXISTS (SELECT * FROM ladderMembers WHERE userID = @userID AND notifyID = @notifyID)
+    BEGIN
+
+	DELETE ladderMembers WHERE userID = @userID AND notifyID = @notifyID
+
+	SELECT @lastError = @@error
+	IF @lastError != 0
+	BEGIN
+	  ROLLBACK TRAN
+	  RETURN @lastError
+	END
+
+	/* recalculate rankings */
+
+	DECLARE rankCursor CURSOR
+	  FOR SELECT userID, rank FROM ladderMembers
+		WHERE notifyID = @notifyID
+		ORDER BY rank ASC
+	
+	DECLARE @i int
+	SELECT @i = 1
+	DECLARE @rank int
+  	OPEN rankCursor
+  	FETCH rankCursor INTO @userID, @rank
+  	WHILE ( @@sqlstatus = 0 ) 
+	BEGIN
+	  /* skip unranked players  */
+	  IF @rank > 0 
+	  BEGIN
+	    UPDATE ladderMembers
+	      SET rank = @i
+	      WHERE notifyID = @notifyID
+	      AND   userID   = @userID
+            SELECT @lastError = @@error
+            IF @lastError != 0
+            BEGIN
+              ROLLBACK TRAN
+              RETURN @lastError
+            END
+	    SELECT @i = @i + 1
+	  END
+  	  FETCH rankCursor INTO @userID, @rank
+	END
+	CLOSE rankCursor
+    END
+
+  COMMIT TRAN
+
+  DECLARE @accountID userIdentifier
+  SELECT  @accountID = accountID
+    FROM vpusers..registration
+    WHERE userID = @userID
+
+  IF @userID IS NOT NULL
+  BEGIN
+    EXEC vpusers..addAcctHistory @accountID, 67, @notifyID
+  END
+END
+GO

@@ -1,0 +1,14 @@
+CREATE TABLE eventInteractions
+(
+	interactionID	numeric(10,0)			IDENTITY
+                        constraint isPrimary primary key,
+	eventID		numeric(10,0)			NOT NULL,
+	interactionType	numeric(2,0)			NOT NULL,
+	time        	smalldatetime			NOT NULL,
+	senderName	VPuserID			NOT NULL,
+	text		varchar(255)			NULL,
+        status          numeric(2,0)                    NOT NULL,
+        category        varchar(16)                     NULL,
+        hostName        VPuserID			NULL
+)
+GO

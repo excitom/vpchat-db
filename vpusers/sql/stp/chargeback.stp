@@ -1,0 +1,244 @@
+/* Update payment records for a credit card chargeback
+
+   output: Return value - 0 - success 
+                          20001 - No such payment
+			  20002 - Acct/pmt don't match
+			  20003 - Can't find ccID
+			  20004 - Already processed
+   output row = original payment date (adjusted for local time zone) and
+                amount of the payment
+*/
+CREATE PROC chargeback (
+  @shopperID  varchar(42),
+  @accountID userIdentifier,
+  @comment   varchar(255),
+  @closeAcct bit = 0,
+  @badCredit bit = 0
+)
+AS
+BEGIN
+  DECLARE @aid        	userIdentifier
+  DECLARE @ccID        	userIdentifier
+  DECLARE @paymentDate	VpTime
+  DECLARE @origDate	VpTime
+  DECLARE @amount	smallmoney
+  DECLARE @AVS_result	varchar(10)
+  DECLARE @orderID	varchar(10)
+  DECLARE @pid 		userIdentifier
+  DECLARE @lastError	int
+  DECLARE @diffFromGMT	int
+  DECLARE @subscription smallmoney
+  DECLARE @accountStatus tinyint
+  DECLARE @bal		smallmoney
+
+  DECLARE @acctClosed   tinyint
+  SELECT  @acctClosed = 3
+  DECLARE @acctOverdue  tinyint
+  SELECT  @acctOverdue= 5
+  
+  SELECT @paymentDate = getdate()
+
+  BEGIN TRAN
+    
+    SELECT @diffFromGMT = gmt
+      FROM getGMT
+    IF @diffFromGMT IS NULL
+      SELECT @diffFromGMT = 0
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN @lastError
+    END
+
+    SELECT @paymentDate = dateadd( hour, (-1) * @diffFromGMT, @paymentDate )
+
+    SELECT @aid          = accountID,
+	   @amount       = amount,
+	   @AVS_result   = AVS_result,
+	   @orderID      = orderID,
+	   @origDate     = paymentDate
+      FROM payments, ccPayments
+      WHERE shopperID = @shopperID
+      AND ccPayments.paymentID = payments.paymentID
+      AND approvalCode != 'CB'
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    IF @aid IS NULL
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20001
+    END
+
+    IF @aid != @accountID
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20002
+    END
+
+    IF EXISTS (
+      SELECT * 
+        FROM payments, ccPayments
+        WHERE orderID = @orderID
+        AND approvalCode = 'CB'
+        AND payments.paymentID = ccPayments.paymentID
+      )
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20004
+    END
+
+    /*
+     * Insert a payment record
+     */
+    SELECT @amount = 0 - @amount
+    INSERT INTO payments (accountID, paymentDate, amount, comment)
+      VALUES (@accountID, @paymentDate, @amount, @comment)
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+        
+    /* get the unique payment ID */
+    SELECT @pid = @@identity
+
+    INSERT INTO ccPayments
+      (paymentID, AVS_result, shopperID, orderID, approvalCode)
+      VALUES (@pid, @AVS_result, @shopperID, @orderID, 'CB')
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    UPDATE accountBalance
+      SET subscription = subscription - @amount
+      WHERE accountID = @accountID
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    SELECT @subscription = subscription
+      FROM accountBalance
+      WHERE accountID = @accountID
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    /*
+     * Update the running balance
+     */
+    SELECT @bal = 0 - @subscription
+    INSERT runningBalance (paymentID, balance) VALUES (@pid, @bal)
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    /*
+     * cancel the subscription
+     */
+    SELECT @ccID = NULL
+    SELECT @ccID = ccID
+      FROM subscriptions
+      WHERE accountID = @accountID
+      AND   type = 2
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    IF @ccID IS NULL
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20003
+    END
+
+    UPDATE subscriptions 
+      SET autoRenew = 0
+      WHERE accountID = @accountID
+      AND   type = 2
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    /*
+     * put chargeback in the history
+     */
+
+    UPDATE renewals
+      SET chargebacks = chargebacks + 1
+      WHERE accountID = @accountID
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+  COMMIT TRAN
+
+  /*
+   * update the account status
+   */
+  IF @closeAcct = 1
+  BEGIN
+    EXEC updateAccountStatus @accountID, @acctClosed
+  END
+  ELSE BEGIN
+    EXEC updateAccountStatus @accountID, @acctOverdue
+  END
+
+  /*
+   * add the card to the bad credit list
+   */
+  IF @badCredit = 1
+  BEGIN
+    EXEC addBadCredit @ccID, @accountID, 2, @comment
+  END
+
+  /*
+   * add a history record
+   */
+  EXEC addAcctHistory @accountID, 40, @ccID, @orderID
+
+  /*
+   * send amount and payment date to output
+   */
+  SELECT @origDate = dateadd( hour, @diffFromGMT, @origDate )
+  SELECT @amount, @origDate
+
+  RETURN 0
+END
+GO

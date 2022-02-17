@@ -1,0 +1,21 @@
+/* find reward points for an account
+ *
+ * output: Return value - 0 - success 
+ *                        20001 - No such user
+ */
+IF EXISTS
+ (SELECT name FROM sysobjects WHERE name = 'getUserPoints' AND type = 'P') 
+ DROP PROC getUserPoints
+GO  
+CREATE PROC getUserPoints (
+    @userID	userIdentifier
+)
+AS
+BEGIN
+  IF NOT EXISTS(SELECT * FROM userPoints WHERE userID = @userID)
+  BEGIN
+    RETURN 20001
+  END
+  SELECT points FROM userPoints WHERE userID = @userID
+END
+GO

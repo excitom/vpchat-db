@@ -1,0 +1,10 @@
+CREATE TABLE accountBalance
+(
+	accountID		userIdentifier			NOT NULL
+                        	CONSTRAINT balanceAccountIDisPrimary PRIMARY KEY
+                        	CONSTRAINT balanceAccountRefToUsers REFERENCES users,
+	subscription		smallmoney			NOT NULL,
+	referral		smallmoney			NOT NULL,
+)
+ON userDetailsSeg
+GO

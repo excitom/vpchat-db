@@ -1,0 +1,12 @@
+/* get welcome image for a specific auditorium */
+/* input:  auditorium id
+   output: image
+*/
+CREATE PROC getAuditoriumImage ( @auditoriumID numeric(6,0) )
+AS
+BEGIN
+  SELECT welcomeImage
+    FROM auditoriums
+    WHERE auditoriumID = @auditoriumID
+END
+GO

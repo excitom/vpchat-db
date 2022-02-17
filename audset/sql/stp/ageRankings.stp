@@ -1,0 +1,153 @@
+/*
+ * Find players who have not played a ranked game in their ladder within
+ * the decay interval, and penalize their rank according to the decay rate.
+ *
+ */
+IF EXISTS( SELECT * FROM sysobjects WHERE name = 'ageRankings' AND type = 'P')
+  DROP PROC ageRankings
+GO
+CREATE PROC ageRankings
+AS
+BEGIN
+  DECLARE @notifyID		userIdentifier
+  DECLARE @userID		userIdentifier
+  DECLARE @now			VpTime
+  DECLARE @timeStamp		VpTime
+  DECLARE @dormant		VpTime
+  DECLARE @lastError		int
+  DECLARE @diffFromGMT 		int
+  DECLARE @decayRate 		int
+  DECLARE @decayInterval 	int
+  DECLARE @rows		 	int
+  DECLARE @maxRank		int
+
+  SELECT @diffFromGMT = gmt
+    FROM vpusers..getGMT
+  IF @diffFromGMT IS NULL
+    SELECT @diffFromGMT = 0
+  SELECT @now = dateadd( hour, (-1) * @diffFromGMT, getdate() )
+  SELECT @dormant = dateadd( week, -1, @now )
+
+  DECLARE ladderCursor CURSOR
+    FOR SELECT ladders.notifyID, decayRate, decayInterval
+	  FROM ladders, notifyLists
+	  WHERE ladders.notifyID = notifyLists.notifyID
+	  AND   deleted = 0
+
+  CREATE TABLE #tempRank (userID int, newRank int, lastAged datetime, lastGame dateTime)
+
+  DECLARE rankCursor CURSOR
+    FOR SELECT userID FROM #tempRank ORDER BY newRank ASC
+	
+  /* process each active ladder */
+  OPEN ladderCursor
+  FETCH ladderCursor INTO @notifyID, @decayRate, @decayInterval
+  WHILE ( @@sqlstatus = 0 ) 
+  BEGIN
+    /* find this ladder's decay interval */
+    SELECT @timeStamp = dateadd( day, (-1) * @decayInterval, @now )
+
+    /* find if any ladder rankings need aging */
+    SELECT @rows = COUNT(*)
+      FROM ladderMembers
+      WHERE notifyID = @notifyID
+      AND   (lastAged < @timeStamp OR lastGame < @dormant)
+      AND   rank > 0
+
+    IF @rows > 0
+    BEGIN
+      BEGIN TRAN
+	INSERT #tempRank SELECT userID, rank, lastAged, lastGame
+				FROM ladderMembers
+				WHERE notifyID = @notifyID
+				AND lastAged IS NOT NULL
+				AND rank > 0
+	INSERT #tempRank SELECT userID, rank, @now, @now
+				FROM ladderMembers
+				WHERE notifyID = @notifyID
+				AND lastAged IS NULL
+				AND rank > 0
+        SELECT @maxRank = max(rank)
+	  FROM ladderMembers
+	  WHERE notifyID = @notifyID
+
+        SELECT @lastError = @@error
+        IF @lastError != 0
+        BEGIN
+          ROLLBACK TRAN
+          DROP TABLE #tempRank
+          RETURN @lastError
+        END
+
+	/* age the ranking of players who are inactive */
+	UPDATE #tempRank
+	  SET newRank = newRank + @maxRank
+	  WHERE lastAged < @timeStamp
+          AND lastAged >= @dormant
+	UPDATE #tempRank
+	  SET newRank = newRank + (@maxRank * 10)
+          WHERE lastGame < @dormant
+	
+	DECLARE @i int
+	SELECT @i = 1
+  	OPEN rankCursor
+  	FETCH rankCursor INTO @userID
+  	WHILE ( @@sqlstatus = 0 ) 
+	BEGIN
+	  /* update the rankings of all the ladder members
+	   * to reflect the changes for the dormant players
+	   */
+	  UPDATE ladderMembers
+	    SET rank = @i
+	    WHERE userID = @userID
+	    AND   notifyID = @notifyID
+
+          SELECT @lastError = @@error
+          IF @lastError != 0
+          BEGIN
+            ROLLBACK TRAN
+            DROP TABLE #tempRank
+            RETURN @lastError
+          END
+  	
+  	  FETCH rankCursor INTO @userID
+	  SELECT @i = @i + 1
+
+        END
+	CLOSE rankCursor
+	DELETE FROM #tempRank
+
+	/*
+	 * send output rows for each rank that was just aged
+	 */
+	SELECT notifyID, userID, rank, lastAged
+	  FROM ladderMembers
+	  WHERE notifyID = @notifyID
+	  AND   lastAged < @timeStamp
+
+	/* update the 'lastAged' for ranks that were just aged,
+	 * to give them another decayInterval before next aging.
+         */
+	UPDATE ladderMembers
+	  SET lastAged = @now
+	  WHERE notifyID = @notifyID
+	  AND   lastAged < @timeStamp
+
+        SELECT @lastError = @@error
+        IF @lastError != 0
+        BEGIN
+          ROLLBACK TRAN
+          DROP TABLE #tempRank
+          RETURN @lastError
+        END
+
+      COMMIT TRAN
+    END		-- ladder has ranks that need aging
+
+    FETCH ladderCursor INTO @notifyID, @decayRate, @decayInterval
+
+  END 		-- process each ladder
+
+  DROP TABLE #tempRank
+END
+GO

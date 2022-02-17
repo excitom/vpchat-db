@@ -1,0 +1,53 @@
+/*
+ * Common code for updating the first round seeds. Called when a 
+ * player resigns (during the registration phase) or when a 
+ * tournament is resized.
+ */
+IF EXISTS(SELECT name FROM sysobjects WHERE name='updateSeeds' AND type='P')
+ DROP PROC updateSeeds
+GO
+CREATE PROC updateSeeds (
+  @tournID	userIdentifier
+)
+AS
+BEGIN
+  DECLARE @lastError	integer
+  DECLARE @i		integer
+  DECLARE @rating	integer
+  DECLARE @uid		userIdentifier
+
+  UPDATE brackets SET player = 0
+    WHERE tournID = @tournID
+    AND round = 1
+
+  DECLARE playerCursor CURSOR
+    FOR SELECT userID, initialRating
+      FROM tournamentPlayers
+      WHERE tournID = @tournID
+      AND        td = 0
+      ORDER BY initialRating DESC
+
+  SELECT @i = 1
+  OPEN playerCursor
+  FETCH playerCursor INTO @uid, @rating
+  WHILE ( @@sqlstatus = 0 ) 
+  BEGIN
+    UPDATE brackets
+      SET player = @uid
+      WHERE tournID = @tournID
+      AND   round = 1
+      AND   seed  = @i
+
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        CLOSE playerCursor
+        RETURN @lastError
+      END
+
+      FETCH playerCursor INTO @uid, @rating
+      SELECT @i = @i + 1
+  END
+  CLOSE playerCursor
+END
+GO

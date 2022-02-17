@@ -1,0 +1,32 @@
+#!/bin/sh
+
+if [ $# -lt 2 ]
+then
+  echo usage: getDbInfoSummary \<sa-login\> \<sa-password\> [ \<DB name\> ] [ \<Measurement Unit: K/M\> ]
+  exit
+fi
+
+if [ x$SYBASE = x ]
+then
+  echo getDbInfoSummary: Please set your SYBASE environment variable to the directory where Sybase SQL Server is installed
+  exit
+fi
+
+
+if [ ! -d $SYBASE/bin ]
+then
+  echo getDbInfoSummary: \$SYBASE/bin directory not found
+  exit
+fi
+
+saLogin=$1
+saPassword=$2
+
+dbName=$3
+sizeUnit=$4
+
+$SYBASE/bin/isql -U$saLogin -P$saPassword << !
+sp_sumdbinfo $dbName $sizeUnit
+GO
+
+!

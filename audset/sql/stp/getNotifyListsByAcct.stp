@@ -1,0 +1,21 @@
+/*
+ * Return a list of the notify lists owned by an account
+ *
+ */
+CREATE PROC getNotifyListsByAcct (
+	@accountID	userIdentifier
+)
+AS
+BEGIN
+  SELECT n.notifyID, n.type, s.bundleID, s.unitCost,
+      description, subheader, URL, unlisted, approvalRqd, adultContent
+    FROM notifyLists n, vpusers..userAccounts a,
+         vpusers..services s, privateLists p
+    WHERE a.accountID = @accountID
+    AND   a.accountID = s.accountID
+    AND   s.itemID = n.notifyID
+    AND   s.itemID = p.notifyID
+    AND   (s.type = 1 OR s.type = 6)
+    ORDER BY description ASC
+END
+GO

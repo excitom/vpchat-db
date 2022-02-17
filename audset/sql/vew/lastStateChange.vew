@@ -1,0 +1,7 @@
+CREATE VIEW lastStateChanges
+AS
+  SELECT eventID, max(time) AS changeTime
+    FROM eventState, vpusers..getGMT
+    WHERE time <= dateadd( hour, (-1) * gmt, getdate() )
+    GROUP BY eventID
+GO

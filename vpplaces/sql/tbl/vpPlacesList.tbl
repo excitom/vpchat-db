@@ -1,0 +1,13 @@
+CREATE TABLE vpPlacesList
+(
+	serialNumber	integer				NOT NULL
+			constraint isPrimary primary key,
+	URL		varchar(255)			NOT NULL,
+	title		varchar(255)			NOT NULL,
+        roomUsage       integer				NOT NULL,
+        corrUsage       integer				NOT NULL,
+	type		integer				NOT NULL,
+	capacity	integer				NOT NULL,
+	repCount	integer				NOT NULL
+)
+GO

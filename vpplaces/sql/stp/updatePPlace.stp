@@ -1,0 +1,13 @@
+/* input:  old URL, new URL
+   output: NONE
+*/
+CREATE PROC updatePPlace
+(
+  @oldURL longName,
+  @newURL longName
+)
+AS
+  UPDATE persistentPlaces
+    SET URL = @newURL
+    WHERE URL = @oldURL
+GO

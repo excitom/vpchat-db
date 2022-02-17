@@ -1,0 +1,112 @@
+/* update a user account record to reflect monthly referral bonus */
+/* input:  account ID, amount
+
+   output: Return value - 0 - success 
+                          20001 - No such account existed in database
+                          20002 - Account not an enrolled referrer
+                          20003 - Account is ineligible
+                          20004 - Duplicate processing, same month
+*/
+CREATE PROC addReferralBonus ( @accountID userIdentifier, @amount smallmoney )
+AS
+BEGIN
+  DECLARE @aid userIdentifier
+  DECLARE @lastError int
+  DECLARE @diffFromGMT int
+  DECLARE @paymentDate VpTime
+  DECLARE @lastProcessed VpTime
+  DECLARE @accountStatus tinyInt
+  DECLARE @enrolledReferrer bit
+  
+  SELECT @paymentDate = getdate()
+
+  BEGIN TRAN
+    
+    SELECT @diffFromGMT = gmt
+      FROM getGMT
+    IF @diffFromGMT IS NULL
+      SELECT @diffFromGMT = 0
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN @lastError
+    END
+
+    SELECT @paymentDate = dateadd( hour, (-1) * @diffFromGMT, @paymentDate )
+
+    SELECT @aid = accountID,
+           @accountStatus = accountStatus,
+           @enrolledReferrer = enrolledReferrer
+      FROM userAccounts
+      WHERE accountID = @accountID
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    IF @accountID != @aid
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20001
+    END
+
+    IF @enrolledReferrer = 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20002
+    END
+
+    IF @accountStatus > 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20003
+    END
+
+    SELECT @lastProcessed = processDate
+     FROM referralHistory
+     WHERE accountID = @aid
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    IF datepart(mm, @paymentDate) = datepart(mm, @lastProcessed)
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20004
+    END
+
+    UPDATE accountBalance
+      SET referral = referral + @amount
+      WHERE accountID = @aid
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+    
+    INSERT referralHistory
+      (accountID, processDate, amount, type)
+      VALUES (@aid, @paymentDate, @amount, 0)
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+  COMMIT TRAN
+  RETURN 0
+END
+GO

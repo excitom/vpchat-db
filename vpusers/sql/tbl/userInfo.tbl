@@ -1,0 +1,29 @@
+/*
+ * Table: Information about a user account holder.
+ *
+ * The address information may duplicate what is in the creditCards
+ * or echecks table, but we need to support users who use other payment
+ * methods (e.g. PayPal, paper checks). Also, the billing address for
+ * the credit card used to pay for an account may not be the residence
+ * address of the account holder.
+ *
+ */
+CREATE TABLE userInfo
+(
+	accountID	userIdentifier			NOT NULL
+                       	CONSTRAINT userInfoIsPrimary PRIMARY KEY,
+	city		VARCHAR(50)			NULL,
+	countrycode	CHAR(2)				NULL,
+	name_first	VARCHAR(50)			NULL,
+	name_last	VARCHAR(50)			NULL,
+	postalcode	VARCHAR(20)			NULL,
+	stateprov	VARCHAR(30)			NULL,
+	street_line1	VARCHAR(50)			NULL,
+	street_line2	VARCHAR(50)			NULL,
+	phone_number	VARCHAR(16)			NULL,
+  	DLnumber	VARCHAR(20)			NULL,
+  	DLstate		VARCHAR(65)			NULL,
+  	DOB		VARCHAR(10)			NULL
+)
+ON userDetailsSeg
+GO

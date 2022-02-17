@@ -1,0 +1,15 @@
+/* Deletes an event vote from the eventVotes tables. A trigger will
+   delete associated information in the voteOptions and userVotes tables*/
+/* input:  voteId. 
+   output: NONE
+*/
+CREATE PROC delEventVote
+(
+  @voteID	numeric(10,0)
+)
+AS
+
+  DELETE eventVotes 
+    WHERE voteID = @voteID
+   
+GO

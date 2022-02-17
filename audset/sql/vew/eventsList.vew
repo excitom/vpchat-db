@@ -1,0 +1,9 @@
+CREATE VIEW eventsList
+AS
+  SELECT DISTINCT events.eventID, events.title,
+         startTime, endTime,
+         auditoriums.name AS auditoriumName 
+    FROM events, auditoriums, eventTimes
+    WHERE events.auditorium = auditoriums.auditoriumID AND
+          events.eventID = eventTimes.eventID
+GO

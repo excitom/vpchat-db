@@ -1,0 +1,9 @@
+CREATE view eventHosts
+AS
+  SELECT events.eventID, hosts.userID
+    FROM hosts, events
+    WHERE ( ( hosts.eventID IS NOT NULL ) AND 
+            ( hosts.eventID = events.eventID ) ) OR
+          ( ( hosts.auditoriumID IS NOT NULL ) AND
+            ( hosts.auditoriumID = events.auditorium ) )
+GO

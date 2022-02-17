@@ -1,0 +1,4 @@
+/* index payments by comment field (usually, a transaction ID) */
+create index paymentsByCommentIdx
+on payments ( comment )
+GO

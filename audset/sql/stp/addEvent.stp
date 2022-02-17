@@ -1,0 +1,180 @@
+/* add a new definition of an event to the database */
+/* input:  event title, auditorium name, client name,
+           time, background URL, 
+           open time, open title, open welcome msg,
+           start time, start title, start welcome msg,
+           start time, start title, start welcome msg,
+           end time,
+           event interactions list
+   output: return value - 0 if successfull,
+                          20001 if auditorium does not exist
+                          20002 if event overlaps other event(s)
+*/
+CREATE PROC addEvent
+(
+  @title		longName,
+  @auditoriumName	varchar(16),
+  @clientName		varchar(16),
+  @time			VpTime,
+  @background		longName,
+  @openTime		VpTime,
+  @openTitle		longName,
+  @openWelcomeMsg1	longName,
+  @openWelcomeMsg2	longName,
+  @startTime		VpTime,
+  @startTitle		longName,
+  @startWelcomeMsg1	longName,
+  @startWelcomeMsg2	longName,
+  @endTime		VpTime,
+  @eventInteractions	longName
+)
+AS
+BEGIN
+  CREATE TABLE #eventInteractions ( id integer, description varchar(16) )
+  DECLARE @description varchar(16)
+  DECLARE @commaPos integer
+  DECLARE @counter integer
+  DECLARE @lastError integer
+
+  DECLARE @eventID int
+  DECLARE @auditoriumID integer
+  SELECT @counter = 1
+
+  BEGIN TRAN addEvent
+
+    /* find auditorium where the event is held */
+    SELECT @auditoriumID = auditoriumID
+      FROM auditoriums
+      WHERE name = @auditoriumName
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      RAISERROR @lastError
+      ROLLBACK TRAN addEvent
+      RETURN @lastError
+    END
+    
+    IF @auditoriumID IS NULL
+      /* auditorium must exist to proceed */
+    BEGIN
+      ROLLBACK TRAN addEvent
+      RETURN 20001
+    END
+
+    /* find if the time frame asked for is not booked already */
+    IF EXISTS 
+      ( SELECT events.eventID
+        FROM eventTimes, events
+         WHERE eventTimes.eventID = events.eventID AND
+               events.auditorium = @auditoriumID   AND
+               ( ( @openTime BETWEEN startTime AND endTime ) OR
+                 ( @endTime BETWEEN startTime AND endTime )  OR
+		 ( (@openTime < startTime) AND (@endTime > endTime))  ) )
+    BEGIN
+      /* event overlaps other event(s) */
+      ROLLBACK TRAN addEvent
+      RETURN 20002
+    END
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      RAISERROR @lastError
+      ROLLBACK TRAN addEvent
+      RETURN @lastError
+    END
+    
+    /* create event record */
+    INSERT events
+      ( auditorium, date, title, client, rowSize, stageBackground )
+      VALUES ( @auditoriumID, @time, @title,
+               @clientName, 0, @background )
+    SELECT @eventID = @@identity
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      RAISERROR @lastError
+      ROLLBACK TRAN addEvent
+      RETURN @lastError
+    END
+        
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      RAISERROR @lastError
+      ROLLBACK TRAN addEvent
+      RETURN @lastError
+    END
+    
+    INSERT eventState
+      VALUES ( @eventID, 1, "open", @openTime, 
+               @openWelcomeMsg1, @openWelcomeMsg2, @openTitle )
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      RAISERROR @lastError
+      ROLLBACK TRAN addEvent
+      RETURN @lastError
+    END
+    
+    INSERT eventState
+      VALUES ( @eventID, 2, "start", @startTime, 
+               @startWelcomeMsg1, @startWelcomeMsg2, @startTitle )
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      RAISERROR @lastError
+      ROLLBACK TRAN addEvent
+      RETURN @lastError
+    END
+    
+    INSERT eventState
+      VALUES ( @eventID, 3, "end", @endTime, "", "", "" )
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      RAISERROR @lastError
+      ROLLBACK TRAN addEvent
+      RETURN @lastError
+    END
+    
+    /* parse list of interaction types */
+    WHILE ( ascii( rtrim(ltrim(@eventInteractions ))) > 32 ) BEGIN
+      SELECT @commaPos = patindex( "%,%", @eventInteractions )
+      IF @commaPos = 0 BEGIN
+        SELECT @description = rtrim(ltrim(@eventInteractions))
+        SELECT @eventInteractions = ""
+      END
+      ELSE BEGIN
+        SELECT @description = 
+                 rtrim( ltrim( substring( @eventInteractions, 1, @commaPos-1 ) ) )
+        SELECT @eventInteractions = 
+                 substring( @eventInteractions, 
+                            @commaPos+1, 
+                            char_length( @eventInteractions ) - @commaPos )
+      END
+      INSERT interactionsAllowed 
+        ( eventID, interactionType, name )
+        VALUES ( @eventID, @counter, @description )
+    
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        RAISERROR @lastError
+        ROLLBACK TRAN addEvent
+        RETURN @lastError
+      END
+    
+      SELECT @counter = @counter+1
+    END /* of while */
+
+  COMMIT TRAN addEvent
+  SELECT @eventID
+
+END
+GO

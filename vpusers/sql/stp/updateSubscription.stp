@@ -1,0 +1,142 @@
+/* update a subscription record 
+   input:
+      accountID
+      subscription type
+           1 = paypal
+           2 = credit card
+           3 = eCheck
+      flag
+	   1 = activate
+	   0 = cancel
+	   -1 = delete
+      comment = PayPal subscription ID if type == 1
+   output: return value -
+           negative value - DB failure, 
+           0 - success
+           20001 - unknown accountID/subscription ID
+           20002 - not valid for PayPal subscr (can't reactivate)
+*/
+CREATE PROC updateSubscription
+( 
+  @accountID userIdentifier,
+  @type         smallint,
+  @autoRenew    int = 0,
+  @comment      longName = NULL
+)
+AS
+BEGIN
+  DECLARE @lastError int
+  DECLARE @aid userIdentifier
+  DECLARE @accountStatus tinyint
+  DECLARE @paymentStatus tinyint
+  DECLARE @ccID userIdentifier
+
+  BEGIN TRAN
+ 
+   /* see if a paypal subscription record exists */
+   IF @type = 1
+   BEGIN
+     IF @autoRenew != 0
+     BEGIN
+       ROLLBACK TRAN
+       RETURN 20002
+     END
+
+     SELECT @aid = accountID
+       FROM subscriptions
+       WHERE accountID = @accountID
+       AND   type = @type
+       AND   comment = @comment
+   END
+   ELSE BEGIN
+     SELECT @aid = accountID,
+            @ccID = ccID
+       FROM subscriptions
+       WHERE accountID = @accountID
+       AND   type = @type
+   END
+
+   SELECT @lastError = @@error
+   IF @lastError != 0
+   BEGIN
+     ROLLBACK TRAN 
+     RETURN @lastError
+   END
+
+   IF @aid IS NULL
+   BEGIN
+     ROLLBACK TRAN 
+     RETURN 20001
+   END
+   
+   IF @type = 1
+   BEGIN
+     UPDATE subscriptions
+       SET autoRenew = 0
+       WHERE accountID  = @accountID
+       AND   type = @type
+       AND   comment = @comment
+   END
+   ELSE BEGIN
+     IF @autoRenew = -1
+     BEGIN
+       DELETE subscriptions
+         WHERE accountID  = @accountID
+         AND   type = @type
+     END
+     ELSE BEGIN
+       UPDATE subscriptions
+         SET autoRenew = @autoRenew
+         WHERE accountID  = @accountID
+         AND   type = @type
+     END
+   END
+
+   SELECT @lastError = @@error
+   IF @lastError != 0
+   BEGIN
+     ROLLBACK TRAN 
+     RETURN @lastError
+   END
+
+  COMMIT TRAN
+
+  /*
+   * If user account is in 'pending' mode, it means that we are
+   * expecting a renewal payment. If the auto-renewing subscription
+   * is cancelled, then we don't expect further payment and the account
+   * should go to 'Overdue'.
+   */
+
+  SELECT @accountStatus = accountStatus,
+         @paymentStatus = paymentStatus
+    FROM userAccounts
+    WHERE accountID = @accountID
+
+  IF @accountStatus = 2 AND @autoRenew = 0
+  BEGIN
+    EXEC updateAccountStatus @accountID, 5
+  END
+
+  /*
+   * add history record(s)
+   */
+  DECLARE @reason int
+  IF @autoRenew = -1
+  BEGIN
+    SELECT @reason = @type + 22
+    EXEC addAcctHistory @accountID, @reason, @ccID, @comment
+  END
+  ELSE BEGIN
+    SELECT @reason = @type + 20
+    EXEC addAcctHistory @accountID, @reason, @autoRenew, @comment
+  END
+
+  IF @paymentStatus = 5 AND @autoRenew = 0
+  BEGIN
+    EXEC addAcctHistory @accountID, 11, 0
+  END
+
+  RETURN 0
+END
+GO 

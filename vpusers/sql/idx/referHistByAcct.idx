@@ -1,0 +1,4 @@
+/* index referralHistory by account ID */
+create index referHistByAcctIdx
+on referralHistory ( accountID )
+GO

@@ -1,0 +1,115 @@
+/*
+ * Remove a user home page
+ *
+ * Note: This just sets the "deleted" flag in the table. We don't actually
+ * remove the record since we don't want people to use delete/re-add to get
+ * around bandwidth limits, for example.
+ *
+ * When a home page is deleted, software that calls this procedure should make
+ * sure the web page is actually removed or disabled from the doc root.
+ *
+ * If the 'cleanup' flag is set, add an entry to homePageChanges so that
+ * home page cleanup will be automatic.
+ *
+ * output: return value - 0 if successful
+ *			  20001 name not found
+ */
+CREATE PROC delHomePageByName
+(
+  @URL		UrlType,
+  @cleanup	tinyint = 0
+)
+AS
+BEGIN
+  DECLARE @lastError int
+  DECLARE @diffFromGMT int
+  DECLARE @URL2 UrlType
+  DECLARE @userID userIdentifier
+
+  BEGIN TRAN
+
+    SELECT @userID = userID
+      FROM vpusers..users
+      WHERE nickName = @URL
+      AND registrationMode = 2
+   
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    IF @userID = NULL
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20001
+    END
+
+    SELECT @URL2 = URL2
+      FROM homePages
+      WHERE userID = @userID
+   
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    IF @URL = NULL
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20001
+    END
+
+    SELECT @diffFromGMT = gmt
+    FROM vpusers..getGMT
+   
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    UPDATE homePages SET deleted = 1 WHERE userID = @userID
+   
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    IF @cleanup = 1
+    BEGIN
+      /*
+       * add a change record 
+       * - the URL is included so the home page dir may be removed
+       * - if there is an alias name (URL2) it is put in the record
+       *   so that the symbolic link for the alias is removed too
+       */
+      IF @URL2 IS NOT NULL
+      BEGIN
+        SELECT @URL = @URL2
+      END
+      INSERT homePageChanges (time, userID, change, intVal, strVal)
+        VALUES (dateadd(hour, (-1) * @diffFromGMT, getdate()),
+                @userID, 'D', 1, @URL)
+        
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+    END
+
+  COMMIT TRAN
+  RETURN 0
+
+END
+GO
+GRANT EXECUTE ON delHomePage TO vpusr
+GO

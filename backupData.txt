@@ -1,0 +1,12 @@
+DBBackupType disk
+DBBackupDir /excite/u/vplaces/s/sybase/db/backup
+SybaseRoot /u/vplaces/s/sybase
+ServicesRoot /logs/sybase/vpdb.2.1.4.1-all
+DbLoginName sa
+DbLoginPassword UBIQUE
+DataServer SYBASE
+backupPlan F
+backupInterval 86400
+fullBackupDay NA
+backupTime 03:00
+backupCopiesToHold 3

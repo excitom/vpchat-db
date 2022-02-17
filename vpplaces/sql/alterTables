@@ -1,0 +1,71 @@
+/* change structure of Place Categories table */
+CREATE TABLE placeCategoriesNew
+(
+	category	categoryIdentifier	NOT NULL,
+	URL		UrlType			NOT NULL,
+	domainFlag	bit	DEFAULT 1	NOT NULL
+)
+GO
+
+DECLARE @match int
+SELECT @match = count(c.constrid)
+  FROM sysobjects o, sysobjects o2, sysconstraints c
+  WHERE ( o.id = c.tableid ) AND
+        ( o2.id = c.constrid ) AND
+        ( o.type = "U" ) AND
+        ( o.name = "placeCategories" ) AND
+        ( o2.name = "placeCategoryRefCategories" )
+IF @match = 1
+BEGIN
+  ALTER TABLE placeCategories
+    DROP CONSTRAINT placeCategoryRefCategories
+END
+GO
+
+DECLARE @matchFound int
+SELECT @matchFound = count(c.constrid)
+  FROM sysobjects o, sysobjects o2, sysconstraints c
+  WHERE ( o.id = c.tableid ) AND
+        ( o2.id = c.constrid ) AND
+        ( o.type = "U" ) AND
+        ( o.name = "placeCategories" ) AND
+        ( o2.name = "placeCategoryRefCategories" )
+IF @matchFound = 1
+BEGIN
+  ALTER TABLE placeCategories
+    ADD CONSTRAINT uniquePlaceCategory
+      UNIQUE( category, URL )
+END
+GO
+
+-- check the columns of a table
+DECLARE @match int
+SELECT @match = count(c.name)
+FROM sysobjects o, syscolumns c
+WHERE ( o.type = "U" ) AND
+      ( o.id = c.id ) AND
+      ( o.name = "placeCategories" ) AND
+      ( c.name = "domainFlag" )
+
+IF ( @match = 0 )
+BEGIN
+  /* add column to table */
+  INSERT placeCategoriesNew
+    SELECT category, URL, 1
+      FROM placeCategories
+  
+  EXEC sp_rename placeCategories, placeCategories0
+  EXEC sp_rename placeCategoriesNew, placeCategories
+  DROP TABLE placeCategories0
+END
+GO
+
+ALTER TABLE placeCategories
+  ADD CONSTRAINT placeCategoryRefCategories 
+    FOREIGN KEY ( category ) REFERENCES categories
+GO
+
+ALTER TABLE placeCategories
+  ADD CONSTRAINT uniquePlaceCategory
+    UNIQUE( category, URL )
+GO

@@ -1,0 +1,16 @@
+/* add a new configuration key */
+CREATE PROC addConfigKey
+(
+  @keyName varchar(20),
+  @belongsTo serviceID,
+  @type smallInt,
+  @keyID smallInt,
+  @intValue int = NULL,
+  @strValue longName = NULL
+)
+AS
+  IF ( @type = 2 )
+    EXEC addStrConfigKey @keyName, @belongsTo, @type, @keyID, @strValue
+  ELSE
+    EXEC addNumConfigKey @keyName, @belongsTo, @type, @keyID, @intValue
+GO

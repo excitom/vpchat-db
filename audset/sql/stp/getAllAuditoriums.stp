@@ -1,0 +1,17 @@
+/* get details of all auditoriums */
+/* input:  NONE
+   output: list of auditoriums, stating -
+   id, name, URL, default title, 
+   default welcome msg, row size, number of rows,
+   stage capacity
+*/
+CREATE PROC getAllAuditoriums
+AS
+BEGIN
+  SELECT auditoriumID, name, background, title,
+         welcomeMsg1, welcomeMsg2, rowSize,
+         numberOfRows, stageCapacity
+    FROM auditoriums
+    ORDER BY name
+END
+GO

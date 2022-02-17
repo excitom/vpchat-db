@@ -1,0 +1,83 @@
+#!/bin/sh
+
+# This script does the creation of database devices
+
+
+# PLEASE MAKE SURE THAT THIS FILE IS EXECUTABLE
+# BY USING chmod +x AFTER YOU SAVE IT
+
+SyBaseRoot=$1
+shift
+ServicesRoot=$1
+shift
+saLogin=$1
+shift
+saPassword=$1
+shift
+DataServer=$1
+
+SYBASE=$SyBaseRoot
+export SYBASE
+
+resFile=$ServicesRoot/dbSizes.txt
+echo checking system existing devices ...
+$SyBaseRoot/bin/isql -U$saLogin -P$saPassword -S$DataServer \
+ -i $ServicesRoot/showAvailableDevices.sql | grep free | \
+ cut -d" " -f12 > $ServicesRoot/availableDevices.txt
+
+
+#################################
+# GENERATE create_devices.sql file   # 
+#################################
+if [ -f $ServicesRoot/create_devices.sql ]
+then
+  \rm $ServicesRoot/create_devices.sql
+fi
+cat << ! > $ServicesRoot/create_devices.sql
+/* CREATE DATA DEVICES */
+!
+
+blocksInMegabyte=`grep blocksInMegabyte= $resFile | cut -d" " -f2`
+numberOfDevices=`grep numberOfDevices= $resFile | cut -d" " -f2`
+currentDevice=1
+while [ $numberOfDevices -ge $currentDevice ]
+do
+  deviceName=`grep device$currentDevice.name= $resFile | cut -d" " -f2`
+  devicePath=`grep device$currentDevice.path= $resFile | cut -d" " -f2`
+  deviceLocation=`grep device$currentDevice.location= $resFile | cut -d" " -f2`
+  if [ $devicePath = device$currentDevice.path= ]
+  then
+    # empty path - use default path
+    devicePath=$SyBaseRoot/db
+  fi
+  deviceLocation=$devicePath/$deviceLocation
+  deviceSize=0
+  deviceSegmentsCount=`grep device$currentDevice.numberOfSegments= $resFile | cut -d" " -f2`
+  segNum=1
+  # sum allocations for all segments to be on device
+  while [ $deviceSegmentsCount -ge $segNum ]
+  do
+    databaseUsingSegment=`grep device$currentDevice.segment$segNum= $resFile | cut -d" " -f2`
+    allocation=`grep $databaseUsingSegment.allocation.*.$deviceName= $resFile | cut -d" " -f2`
+    deviceSize=`expr $deviceSize + $allocation`
+    # increment segNum
+    segNum=`expr $segNum + 1`
+  done
+  
+  # keep ~10% spare
+  spare=`expr $deviceSize / 10`
+  deviceSize=`expr $deviceSize + $spare`
+  deviceSize=`expr $deviceSize \* $blocksInMegabyte`
+  dbDeviceNumber=`head -$currentDevice $ServicesRoot/availableDevices.txt | tail -1`
+  
+cat << ! >> $ServicesRoot/create_devices.sql
+DISK INIT     name = "$deviceName",
+	  physname = "$deviceLocation",
+            vdevno = $dbDeviceNumber,
+              size = $deviceSize
+GO
+!
+  
+  # increment currentDevice
+  currentDevice=`expr $currentDevice + 1`
+done

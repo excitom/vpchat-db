@@ -1,0 +1,20 @@
+/*
+ * Game ladder tournament brackets
+ *
+ */
+CREATE TABLE brackets
+(
+	tournID		userIdentifier		NOT NULL,
+	seed		smallint		NOT NULL,
+	round		tinyint			NOT NULL,
+        bracketType	tinyint	DEFAULT 0	NOT NULL,
+        -- 0 = regular/winners
+        -- 1 = losers
+        -- 2 = finals
+	player		userIdentifier		NULL,
+	gameNum		smallint		NOT NULL,
+	winner		bit			NOT NULL,
+	gameID		userIdentifier		NULL,
+	CONSTRAINT uniqueBracket UNIQUE ( tournID, seed, round )
+)
+GO

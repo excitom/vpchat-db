@@ -1,0 +1,48 @@
+/*
+ * Find all in-progress tournaments that have a time limit set
+ * for their rounds. Set round ended for any that have exceeded
+ * the time limit.
+ *
+ * Tom Lang 1/2005
+ */
+IF EXISTS
+ (SELECT name FROM sysobjects WHERE name='timeRounds' AND type='P')
+ DROP PROC timeRounds
+GO
+CREATE PROC timeRounds
+AS
+BEGIN
+  DECLARE @diffFromGMT	integer
+  DECLARE @tournID	userIdentifier
+  DECLARE @roundStarted	VpTime
+  DECLARE @now		VpTime
+  DECLARE @timeLimit	integer
+
+  SELECT @diffFromGMT = gmt
+    FROM vpusers..getGMT
+  IF @diffFromGMT IS NULL
+    SELECT @diffFromGMT = 0
+
+  SELECT @now = dateadd( hour, (-1) * @diffFromGMT, getdate() )
+
+  DECLARE tourneyCursor CURSOR FOR
+   SELECT tournID, roundStarted, timeLimit FROM tournaments
+     WHERE timeLimit > 0
+     AND      status = 0x02
+
+  OPEN tourneyCursor
+  FETCH tourneyCursor INTO @tournID, @roundStarted, @timeLimit
+  WHILE ( @@sqlstatus = 0 ) 
+  BEGIN
+    
+    IF dateadd( minute, @timeLimit, @roundStarted ) >= @now
+    BEGIN
+select @tournID AS tournID, @roundStarted as roundStarted, @now as now, @timeLimit as timeLimit
+      EXEC updateTournament @tournID, 0x20
+    END
+
+    FETCH tourneyCursor INTO @tournID, @roundStarted, @timeLimit
+  END
+  CLOSE tourneyCursor
+END
+GO

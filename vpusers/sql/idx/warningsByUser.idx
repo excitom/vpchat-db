@@ -1,0 +1,4 @@
+/* index warnings by user */
+create index userIdx
+on warnings ( userID )
+GO

@@ -1,0 +1,15 @@
+CREATE TABLE events
+(
+	eventID		eventIdentifier			IDENTITY
+                        constraint isPrimary primary key,
+	auditorium	auditoriumIdentifier		NOT NULL,
+	date        	VpTime				NOT NULL,
+	currentState	numeric(4,0)	DEFAULT 0	NOT NULL,
+	title		longName			NOT NULL,
+	client		varchar(16)			NULL,
+	rowSize		integer				NOT NULL,
+	rowNamePrefix	varchar(10)	DEFAULT "Row "	NOT NULL,
+	welcomeImage	image				NULL,
+	stageBackground	longName			NOT NULL,
+)
+GO

@@ -1,0 +1,133 @@
+/* update demographic details for specified user
+   if no user details records exists for this user,
+   it will be created.
+
+   INPUT  : all details for that user (list to long to
+            put it here)
+   OUTPUT : return value - 0 if successfull
+                           20001 if no matching registered user was found
+*/
+
+CREATE PROC setUserDetails
+(
+  @nickName		VPuserID,
+  @firstName		varchar(30),
+  @lastName		varchar(50),
+  @address		varchar(50),
+  @city			varchar(30),
+  @state		varchar(30),
+  @country		char(2),
+  @zipcode		varchar(25),
+  @hobbies		varchar(60),
+  @occupation		varchar(60),
+  @personalQuote	varchar(60),
+  @location		varchar(60),
+  @email		varchar(60),
+  @age			tinyInt,
+  @gender		tinyInt
+)
+AS
+BEGIN
+  DECLARE @lastError int
+  DECLARE @detailsRecordExists bit
+  DECLARE @userID userIdentifier
+
+  BEGIN TRAN setUserDetails
+    
+    SELECT @userID = userID
+    FROM   users
+    WHERE  nickName = @nickName
+    AND    registrationMode = 2
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN setUserDetails
+      RETURN @lastError
+    END
+
+    IF @userID IS NULL
+    BEGIN
+      ROLLBACK TRAN setUserDetails
+      RETURN 20001
+    END
+
+    IF @firstName IS NULL
+      SELECT @firstName = ' '
+
+    IF @lastName IS NULL
+      SELECT @lastName = ' '
+    
+    SELECT @detailsRecordExists = count(*)
+      FROM userDetails
+      WHERE userID = @userID
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN setUserDetails
+      RETURN @lastError
+    END
+    
+    IF @detailsRecordExists = 1
+    BEGIN
+      /* record already exists - update it */
+      UPDATE userDetails
+        SET
+	  firstName	= @firstName,
+	  lastName	= @lastName,
+          address	= @address,
+	  city		= @city,
+	  state		= @state,
+	  country	= @country,
+	  zipcode	= @zipcode,
+	  hobbies	= @hobbies,
+	  occupation	= @occupation,
+	  personalQuote	= @personalQuote,
+  	  location	= @location,
+  	  email		= @email,
+	  age		= @age,
+	  gender	= @gender
+        WHERE userID	= @userID
+      
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN setUserDetails
+        RETURN @lastError
+      END
+    END /* record already exists - update it */
+    ELSE
+    BEGIN
+      /* record does not exist - create it */
+      INSERT userDetails
+        VALUES
+        (
+	  @userID,
+	  @firstName,
+	  @lastName,
+          @address,
+	  @city,
+	  @state,
+	  @country,
+	  @zipcode,
+	  @hobbies,
+	  @occupation,
+	  @personalQuote,
+  	  @location,
+  	  @email,
+	  @age,
+	  @gender
+        )
+      
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN setUserDetails
+        RETURN @lastError
+      END
+    END /* record does not exist - create it */
+    
+  COMMIT TRAN setUserDetails
+END
+GO

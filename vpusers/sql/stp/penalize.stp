@@ -1,0 +1,72 @@
+/* --- add a penalty for a user --- */
+/* this is an interface for calling from an HTML GUI,
+   so it just receives some parameters and uses them
+   to call addPenalty. 
+   NOTE: local DATABASE SERVER time is used (GMT is better) */
+/* 
+  output : return value - same as addPenaltyToUser
+*/
+CREATE PROC penalize
+( 
+  @nickName VPuserID,
+  @regMode VpRegMode,
+  @penaltyDescription varchar(30),
+  @minutesDuration integer,
+  @issuedBy VPuserID, 
+  @issuerRegMode VpRegMode,
+  @comment varchar(255) 
+)
+AS
+BEGIN
+  DECLARE @penaltyType integer
+  DECLARE @allowAuxAsLocal bit
+  DECLARE @lastError int
+  DECLARE @retVal int
+  
+  SELECT @nickName = lower(@nickName)
+  
+  BEGIN TRAN penalize
+    SELECT @penaltyType = penaltyType FROM penaltyTypes
+      WHERE description = @penaltyDescription
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN penalize
+      RETURN @lastError
+    END
+    
+    SELECT @allowAuxAsLocal = 0
+    SELECT @allowAuxAsLocal = intValue
+      FROM configurationKeys
+      WHERE ( keyName = "auxDbAllowed" )
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+    
+    EXEC @retVal =
+      addPenaltyToUser @nickName, @regMode, 
+                       @penaltyType, @minutesDuration, 
+                       @issuedBy, @issuerRegMode, 
+                       @comment, @allowAuxAsLocal
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN penalize
+      RETURN @lastError
+    END
+    
+    IF @retVal != 0
+    BEGIN
+      ROLLBACK TRAN penalize
+      RETURN @retVal
+    END
+    
+  COMMIT TRAN penalize
+END
+GO 

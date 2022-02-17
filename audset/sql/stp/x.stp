@@ -1,0 +1,101 @@
+/*
+ * Find pending message notify events due for processing.
+ * - Return list of these events
+ * - Delete them from the pending list
+ * - Update the event history
+ */
+IF EXISTS
+ (SELECT name FROM sysobjects WHERE name = 'doNotifyEvents' AND type = 'P') 
+ DROP PROC doNotifyEventsX
+GO  
+CREATE PROC doNotifyEventsX
+AS
+BEGIN
+  DECLARE @lastError	int
+  DECLARE @diffFromGMT 	int
+  DECLARE @description 	longName
+  DECLARE @message 	longName
+  DECLARE @nickName 	longName
+  DECLARE @eventID 	userIdentifier
+  DECLARE @userID 	userIdentifier
+  DECLARE @tournID 	userIdentifier
+  DECLARE @notifyID 	userIdentifier
+  DECLARE @accountID 	userIdentifier
+  DECLARE @scheduled   	VpTime
+  DECLARE @now    	VpTime
+  DECLARE @type    	int
+  DECLARE @status    	tinyint
+
+  BEGIN TRAN
+    SELECT @diffFromGMT = gmt
+      FROM vpusers..getGMT
+    IF @diffFromGMT IS NULL
+      SELECT @diffFromGMT = 0
+select 'DIFF', @diffFromGMT
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    SELECT @now = dateadd( hour, (-1) * @diffFromGMT, getdate() )
+select @now
+
+    DECLARE evCursor CURSOR
+    FOR 
+    SELECT  eventID,
+            tournID,
+            userID,
+            accountID,
+            notifyID,
+            time,
+            message
+      FROM  notifyEvents
+      WHERE time <= @now
+    FOR UPDATE
+
+    OPEN evCursor
+    FETCH evCursor INTO @eventID, @tournID, @userID, @accountID, @notifyID, 
+                        @scheduled, @message
+    WHILE ( @@sqlstatus = 0 ) 
+    BEGIN
+
+      SELECT @description = description,
+             @type = type
+        FROM notifyLists
+        WHERE notifyID = @notifyID
+
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+ 
+      SELECT @nickName = nickName
+        FROM vpusers..users
+        WHERE userID = @userID
+        AND registrationMode = 2
+
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+
+      /* 
+       * Send a row to output
+       */
+      SELECT @eventID, @notifyID, @tournID, @description, @nickName, @message, @type
+
+      FETCH evCursor INTO @eventID, @tournID, @userID, @accountID, @notifyID, 
+                          @scheduled, @message
+    END
+    CLOSE evCursor
+
+  COMMIT TRAN
+END
+GO

@@ -1,0 +1,75 @@
+/* Adds an event vote option to the voteOptions table */
+/* input:  voteId, vote option, vote option description. 
+   output: Errors: 
+            - 20001: Vote is active, cannot delete options
+            - 20002: Vote has already 10 vote options.
+*/
+CREATE PROC addVoteOption
+(
+  @voteID		numeric(10,0),
+  @option		varchar(10),
+  @description          varchar(50)
+)
+AS
+BEGIN
+  DECLARE @lastOptionID int
+  DECLARE @lastError    int
+  DECLARE @status int
+
+  BEGIN TRAN
+  /* Check that vote is not active */
+  SELECT @status = status
+    FROM eventVotes
+    WHERE voteID = @voteID
+  SELECT @lastError = @@error
+  IF @lastError != 0
+  BEGIN
+    ROLLBACK TRAN
+    RETURN @lastError
+  END 
+
+  IF @status = 1 
+  BEGIN
+    ROLLBACK TRAN
+    RETURN 20001   /* Vote is active, cannot delete options */
+  END 
+
+  /* Get the last option id used for this vote */
+  SELECT @lastOptionID = max(optionID)
+    FROM voteOptions
+    WHERE voteID = @voteID
+  SELECT @lastError = @@error
+  IF @lastError != 0 
+  BEGIN
+    ROLLBACK TRAN
+    RETURN @lastError
+  END
+
+  /* Set this option id to the next available id, up to 10 */
+  IF @lastOptionID IS NULL 
+    SELECT @lastOptionID = 1
+  ELSE
+  BEGIN
+    IF @lastOptionID >= 10 
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20002
+    END
+
+    SELECT @lastOptionID = @lastOptionID + 1
+  END
+
+  /* Add this option to the table */
+  INSERT INTO voteOptions 
+      ( voteID, optionID, label, description, totalSelections)
+    VALUES ( @voteID, @lastOptionID, @option, @description, 0)
+  SELECT @lastError = @@error
+  IF @lastError != 0 
+  BEGIN
+    ROLLBACK TRAN
+    RETURN @lastError
+  END
+  
+  COMMIT TRAN    
+END
+GO

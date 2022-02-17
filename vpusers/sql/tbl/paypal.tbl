@@ -1,0 +1,18 @@
+/*
+ * This table tracks information about people who use PayPal.
+ * Input come from PayPal IPN messages.
+ *
+ * This table is similar to credit card information, hence the ccID
+ * column. 
+ */
+CREATE TABLE paypal
+(
+	ccID		userIdentifier			IDENTITY
+                        	constraint isPrimary primary key,
+	email		VARCHAR(75)	NOT NULL,
+	first_name	VARCHAR(50)	NOT NULL,
+	last_name	VARCHAR(50)	NOT NULL,
+        payer_status    VARCHAR(20)     NOT NULL,
+	payer_id	VARCHAR(20)	NULL
+)
+GO

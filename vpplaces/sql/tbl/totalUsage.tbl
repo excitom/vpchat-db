@@ -1,0 +1,10 @@
+CREATE TABLE totalUsage
+(
+	time		VpTime				NOT NULL
+			constraint isPrimary primary key,
+        totalUsage      integer,
+        roomUsage       integer,
+        corrUsage       integer,
+        BLUsage         integer
+)
+GO

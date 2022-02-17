@@ -1,0 +1,32 @@
+/*
+ * Get details of a tournament
+ *
+ * Input: tournID
+ *
+ * Output: 0 = success
+ *         20000 = no such tournament
+ */
+IF EXISTS
+ (SELECT name FROM sysobjects WHERE name = 'getTournamentInfo' AND type = 'P') 
+ DROP PROC getTournamentInfo
+GO  
+CREATE PROC getTournamentInfo (
+	@tournID userIdentifier
+)
+AS
+BEGIN
+  IF NOT EXISTS (SELECT * FROM tournaments WHERE tournID = @tournID)
+  BEGIN
+    RETURN 20000
+  END
+  SELECT t.notifyID, title, ladderName, t.type, t.status, t.players,
+	startTime, timeLimit, currencyType, addedValue, buyIn, splitPrize,
+	accountID, l.gameTypeID, gameName, currentRound, scoreFmt, roomURL
+    FROM tournaments t, ladders l, vpusers..services s, gameTypes g
+    WHERE tournID = @tournID
+    AND   t.notifyID = l.notifyID
+    AND   t.notifyID = s.itemID
+    AND   l.gameTypeID = g.gameTypeID
+    AND   s.type = 6
+END
+GO

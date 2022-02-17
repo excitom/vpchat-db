@@ -1,0 +1,25 @@
+/*
+ * Get all the names for an account, with associated attributes.
+ *
+ * Input: accountID
+ * Output: 0 = success
+ *         20001 = unknown account
+ * If success, one row of output per user name.
+ *
+ */
+CREATE PROC getAcctNames ( @accountID userIdentifier )
+AS
+BEGIN
+  IF NOT EXISTS (
+    SELECT * FROM userAccounts WHERE accountID = @accountID
+  )
+  BEGIN
+    RETURN 20001
+  END
+
+  SELECT nickName,locked,restricted,penalties,warnings,ignores,lastSignOnDate
+    FROM  users, registration
+    WHERE registration.accountID = @accountID
+    AND   users.userID = registration.userID
+END
+GO 

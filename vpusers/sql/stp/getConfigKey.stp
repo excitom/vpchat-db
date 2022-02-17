@@ -1,0 +1,11 @@
+/* get value of one configuration value
+   from the configuration keys table    */
+/* input:  key name
+   output: int value, strValue for that key
+ */
+CREATE PROC getConfigKey ( @keyName varchar(20) )
+AS
+  SELECT intValue, strValue
+    FROM configurationKeys
+    WHERE keyName = @keyName
+GO

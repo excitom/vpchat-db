@@ -1,0 +1,47 @@
+/* --- show all privileges, sorted by user and privilege type --- */
+/* this is an interface for calling from an HTML GUI */
+CREATE PROC showPrivileges
+( 
+  /* get list of privilege types to be shown,
+     as string with names of types separarted by commas */
+  @typesRequested varchar(255)
+)
+AS
+BEGIN
+  
+  IF @typesRequested = "*"
+  BEGIN
+    /* show everything */
+    SELECT * 
+      FROM privilegesWithNames
+      ORDER BY Name, Mode, Privilege
+  END
+  ELSE BEGIN
+    /* find what privilege types to show */
+    /* parse list */
+    CREATE TABLE #typesToGet ( description varchar(30) )
+    DECLARE @description varchar(30)
+    DECLARE @commaPos integer
+    WHILE ( ascii( rtrim(ltrim(@typesRequested ))) > 32 ) BEGIN
+      SELECT @commaPos = patindex( "%,%", @typesRequested )
+      IF @commaPos = 0 BEGIN
+        SELECT @description = rtrim(ltrim(@typesRequested))
+        SELECT @typesRequested = ""
+      END
+      ELSE BEGIN
+        SELECT @description = rtrim( ltrim( substring( @typesRequested, 1, @commaPos-1 ) ) )
+        SELECT @typesRequested = 
+          substring( @typesRequested, 
+                     @commaPos+1, 
+                     char_length( @typesRequested ) - @commaPos )
+      END
+      INSERT INTO #typesToGet VALUES ( @description )
+    END
+    SELECT privilegesWithNames.*
+      FROM privilegesWithNames, #typesToGet
+      WHERE Privilege = #typesToGet.description
+      ORDER BY Name, Mode, Privilege
+  END  
+
+END
+GO 

@@ -1,0 +1,202 @@
+/* update the record for an existsing auditorium:
+   name, client name, background, 
+   title, welcome message, show on PTG flag, 
+   stageCapacity, row size, # of rows */
+/* input:  auditorium id, name, client name, 
+           background, title, welcome message, 
+           show on PTG flag, 
+           stageCapacity, row size, # of rows
+   output: return value 20001 if auditorium Id not found,
+                        20003 if name is already used
+                        20002 if background URL already used
+*/
+CREATE PROC updateAuditorium
+(
+  @auditoriumID numeric(6,0),
+  @auditoriumName	varchar(16) = NULL,
+  @clientName		varchar(16) = NULL,
+  @background		varchar(255) = NULL,
+  @title		varchar(255) = NULL,
+  @welcomeMsg1		varchar(255) = NULL,
+  @welcomeMsg2		varchar(255) = NULL,
+  @showOnPTG		bit = 1,
+  @stageCapacity	integer = NULL, 
+  @rowSize		integer = NULL,
+  @numberOfRows		integer = NULL
+)
+AS
+BEGIN
+  DECLARE @oldName		varchar(16)
+  DECLARE @oldClient		varchar(16)
+  DECLARE @oldBackground	varchar(255)
+  DECLARE @oldTitle		varchar(255)
+  DECLARE @oldWelcomeMsg1	varchar(255)
+  DECLARE @oldWelcomeMsg2	varchar(255)
+  DECLARE @oldStageCapacity	integer 
+  DECLARE @oldRowSize		integer
+  DECLARE @oldNumberOfRows	integer
+  
+  DECLARE @lastError int
+  BEGIN TRAN updateAuditorium
+    /* first check if the auditorium exists */
+    SELECT @oldName = name,
+           @oldClient = client,
+           @oldBackground = background,
+           @oldTitle = title,
+           @oldWelcomeMsg1 = welcomeMsg1,
+           @oldWelcomeMsg2 = welcomeMsg2,
+           @oldStageCapacity = stageCapacity,
+           @oldRowSize = rowSize,
+           @oldNumberOfRows = numberOfRows
+      FROM auditoriums
+      WHERE auditoriumID = @auditoriumID
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      raiserror @lastError
+      ROLLBACK TRAN updateAuditorium
+      RETURN @lastError
+    END
+    
+    IF @oldName IS NULL
+    BEGIN
+      /* could not find matching auditorium */
+      ROLLBACK TRAN updateAuditorium
+      RETURN 20001
+    END
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      raiserror @lastError
+      ROLLBACK TRAN updateAuditorium
+      RETURN @lastError
+    END
+    
+    IF @auditoriumName IS NULL
+      SELECT @auditoriumName = @oldName
+    ELSE
+    BEGIN
+      IF ( @auditoriumName != @oldName )
+      BEGIN
+        
+        IF EXISTS
+          ( SELECT auditoriumID
+    	  FROM auditoriums
+      	  WHERE name = @auditoriumName )
+        BEGIN
+          /* name is already used */
+          RETURN 20003
+          ROLLBACK TRAN
+        END
+        
+        SELECT @lastError = @@error
+        IF @lastError != 0
+        BEGIN
+          ROLLBACK TRAN
+          RETURN @lastError
+        END
+      END
+    END
+
+    IF @clientName IS NULL
+      SELECT @clientName = @oldClient
+
+    IF @background IS NULL
+      SELECT @background = @oldBackground
+    ELSE
+    BEGIN
+      IF ( @background != @oldBackground )
+      BEGIN
+        IF EXISTS
+          ( SELECT auditoriumID
+    	  FROM auditoriums
+      	  WHERE background = @background )
+        BEGIN
+          /* name is already used */
+          RETURN 20002
+          ROLLBACK TRAN
+        END
+        
+        SELECT @lastError = @@error
+        IF @lastError != 0
+        BEGIN
+          ROLLBACK TRAN
+          RETURN @lastError
+        END
+      END
+    END
+
+    IF @title IS NULL
+      SELECT @title = @oldTitle
+    ELSE
+    BEGIN
+      INSERT auditoriumChanges
+       VALUES(@auditoriumID, 3) 
+      
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        raiserror @lastError
+        ROLLBACK TRAN updateAuditorium
+        RETURN @lastError
+      END
+    END
+
+    IF NOT (@welcomeMsg1 IS NULL) OR 
+       NOT (@welcomeMsg2 IS NULL)
+    BEGIN
+      INSERT auditoriumChanges
+       VALUES(@auditoriumID, 2) 
+      
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        raiserror @lastError
+        ROLLBACK TRAN updateAuditorium
+        RETURN @lastError
+      END
+    END
+
+    IF @welcomeMsg1 IS NULL
+      SELECT @welcomeMsg1 = @oldWelcomeMsg1
+    
+    IF @welcomeMsg2 IS NULL
+      SELECT @welcomeMsg2 = @oldWelcomeMsg2
+
+    IF @stageCapacity IS NULL
+      SELECT @stageCapacity = @oldStageCapacity
+
+    IF @rowSize IS NULL
+      SELECT @rowSize = @oldRowSize
+
+    IF @numberOfRows IS NULL
+      SELECT @numberOfRows = @oldNumberOfRows
+    
+    
+    UPDATE auditoriums
+      SET name = @auditoriumName,
+          client = @clientName,
+          background = @background,
+          title = @title,
+          welcomeMsg1 = @welcomeMsg1,
+          welcomeMsg2 = @welcomeMsg2,
+          inPlacesList = @showOnPTG,
+          stageCapacity = @stageCapacity,
+          rowSize = @rowSize,
+          numberOfRows = @numberOfRows
+      FROM auditoriums
+      WHERE auditoriumID = @auditoriumID
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      raiserror @lastError
+      ROLLBACK TRAN updateAuditorium
+      RETURN @lastError
+    END
+    
+  COMMIT TRAN updateAuditorium
+END
+GO

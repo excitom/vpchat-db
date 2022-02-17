@@ -1,0 +1,11 @@
+CREATE TABLE answers
+(
+	interactionID	numeric(10,0)			NOT NULL,
+	time        	smalldatetime			NOT NULL,
+	senderName	VPuserID			NOT NULL,
+	text		varchar(255)			NULL,
+        status          numeric(2,0)                    NOT NULL,
+        hostName        VPuserID                        NULL,
+		PRIMARY KEY ( interactionID )
+)
+GO

@@ -1,0 +1,163 @@
+/*
+ * Mark a tournament as deleted. This doesn't actually remove it
+ * from the database, since we want to preserve a record.
+ *
+ * However, there is an option to truly delete the record, to be used
+ * by an authorized administrator for database cleanup.
+ *
+ * Input: EventID
+ *
+ * Output: 0 = success
+ *         20000 = no such event
+ */
+IF EXISTS
+ (SELECT name FROM sysobjects WHERE name = 'delTournament' AND type = 'P') 
+ DROP PROC delTournament
+GO  
+CREATE PROC delTournament (
+	@tournID	userIdentifier,
+	@force		bit=0
+)
+AS
+BEGIN
+  DECLARE @currencyType	tinyint
+  DECLARE @status	tinyint
+  DECLARE @addedValue	smallmoney
+  DECLARE @buyIn	smallmoney
+  DECLARE @userID	userIdentifier
+  DECLARE @lastError	int
+  DECLARE @accountID	userIdentifier
+  DECLARE @ownerID	userIdentifier
+  DECLARE @prizeAwarded bit
+
+  SELECT @accountID = accountID		-- used later for account history
+    FROM vpusers..services, tournaments
+      WHERE tournID = @tournID
+      AND vpusers..services.itemID = tournaments.notifyID
+      AND vpusers..services.type=6
+
+  SELECT @ownerID = ownerID
+    FROM vpusers..userAccounts
+    WHERE accountID = @accountID
+
+  BEGIN TRAN
+    IF NOT EXISTS (SELECT * FROM tournaments WHERE tournID=@tournID)
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20000
+    END
+
+    SELECT @currencyType = currencyType, @addedValue = addedValue,
+             @status = status, @prizeAwarded = prizeAwarded
+      FROM tournaments
+      WHERE tournID=@tournID
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN @lastError
+    END
+
+    /*
+     * Refund points, if necessary
+     */
+    IF @prizeAwarded = 0
+    BEGIN
+      DECLARE playerCursor CURSOR
+        FOR SELECT userID, buyIn
+          FROM tournamentPlayers
+          WHERE tournID = @tournID
+          AND td = 0
+
+      OPEN playerCursor
+      FETCH playerCursor INTO @userID, @buyIn
+      WHILE ( @@sqlstatus = 0 ) 
+      BEGIN
+        IF @buyIn IS NOT NULL AND @buyIn > 0
+        BEGIN
+          IF @currencyType = 0
+          BEGIN
+            EXEC @lastError = vpusers..updateUserPoints @userID, @buyIn
+            IF @@trancount = 0 OR @lastError != 0
+            BEGIN
+              IF @@trancount > 0
+                ROLLBACK TRAN
+              RETURN 20001
+            END
+          END
+          -- ELSE BEGIN
+            -- real money
+          -- END
+        END
+        FETCH playerCursor INTO @userID, @buyIn
+      END
+      CLOSE playerCursor
+
+      /* If this is a team game, refund buy in to teammates also */
+
+      IF EXISTS (SELECT * FROM teamMates WHERE tournID = @tournID)
+      BEGIN
+        DECLARE teamCursor CURSOR
+          FOR SELECT userID, buyIn
+            FROM teamMates
+            WHERE tournID = @tournID
+            AND confirmed = 1
+
+        OPEN teamCursor
+        FETCH teamCursor INTO @userID, @buyIn
+        WHILE ( @@sqlstatus = 0 ) 
+        BEGIN
+          IF @buyIn IS NOT NULL AND @buyIn > 0
+          BEGIN
+            IF @currencyType = 0
+            BEGIN
+              EXEC @lastError = vpusers..updateUserPoints @userID, @buyIn
+              IF @@trancount = 0 OR @lastError != 0
+              BEGIN
+                IF @@trancount > 0
+                  ROLLBACK TRAN
+                RETURN 20001
+              END
+            END
+            -- ELSE BEGIN
+              -- real money
+            -- END
+          END
+          FETCH teamCursor INTO @userID, @buyIn
+        END
+        CLOSE teamCursor
+      END
+
+      IF @addedValue IS NOT NULL AND @addedValue > 0 AND @ownerID IS NOT NULL
+      BEGIN
+        EXEC @lastError = vpusers..updateUserPoints @ownerID, @addedValue
+        IF @@trancount = 0 OR @lastError != 0
+        BEGIN
+          IF @@trancount > 0
+            ROLLBACK TRAN
+          RETURN 20001
+        END
+      END
+      UPDATE tournaments SET prizeAwarded = 1 WHERE tournID = @tournID
+    END
+
+    IF @force = 1
+    BEGIN
+      DELETE tournamentPlayers WHERE tournID=@tournID
+      DELETE brackets WHERE tournID=@tournID
+      DELETE tournaments WHERE tournID=@tournID
+      DELETE teamMates WHERE tournID=@tournID
+    END
+    ELSE BEGIN
+      UPDATE tournaments SET status = 8 WHERE tournID = @tournID
+    END
+
+  COMMIT TRAN
+
+  IF @force = 0
+  BEGIN
+    EXEC vpusers..addAcctHistory @accountID, 65, @tournID
+  END
+END
+GO

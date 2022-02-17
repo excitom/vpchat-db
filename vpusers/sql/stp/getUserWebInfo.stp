@@ -1,0 +1,49 @@
+/*
+ * Get information about the home page associated with a user.
+ *
+ * Input: nickName
+ * Output: 0 = success
+ *         20001 = unknown user
+ *
+ */
+CREATE PROC getUserWebInfo ( @nickName VPuserID )
+AS
+BEGIN
+  DECLARE @userID userIdentifier
+  DECLARE @lastError int
+
+  BEGIN TRAN
+    SELECT @userID = NULL
+    SELECT @userID = userID 
+      FROM users
+      WHERE nickName = @nickName
+      AND   registrationMode = 2
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN @lastError
+    END
+
+    IF @userID IS NULL
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN 20001
+    END
+
+    SELECT maxSpace, maxTransfer, megsTransferred, bytesTransferred, webHits, pageViews, bytesUsed, statsDate, locked, deleted, URL2
+      FROM  vpplaces..homePages
+      WHERE userID = @userID
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN @lastError
+    END
+
+  COMMIT TRAN
+  RETURN 0
+END
+GO 

@@ -1,0 +1,8 @@
+CREATE TABLE privilegeDomains
+(
+	userID			userIdentifier			NOT NULL
+                        	CONSTRAINT PrivDomainsRefToUsers REFERENCES users,
+	domain			UrlType				NOT NULL,
+	CONSTRAINT PrivDomainsIDisPrimary PRIMARY KEY ( userID, domain )
+)
+GO

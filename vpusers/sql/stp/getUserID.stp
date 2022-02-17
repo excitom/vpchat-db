@@ -1,0 +1,27 @@
+/* get the user ID for a specified nick name
+   of a registered user
+
+   INPUT  : nick name, user ID (output parameter)
+   OUTPUT : userID parameter will be set to the user ID of the 
+            matching registered user, or 0 if there is no such user
+*/
+
+CREATE PROC getUserID ( @nickName VPuserID, @userID userIdentifier OUTPUT )
+AS
+BEGIN
+  DECLARE @lastError int
+  SELECT @userID = 0
+
+  BEGIN TRAN getUserID
+    SELECT @userID = userID
+      FROM users
+      WHERE ( nickName = @nickName )
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN getUserID
+    END
+  COMMIT TRAN getUserID
+END
+GO

@@ -1,0 +1,27 @@
+/* Copyright 2005 Tom Lang, All right reserved */
+/*
+ * Cancel a calendar event
+ *
+ * Tom Lang 3/2005
+ */
+IF EXISTS(SELECT name FROM sysobjects WHERE name='delCalendarEvent' AND type='P')
+ DROP PROC delCalendarEvent
+GO
+CREATE PROC delCalendarEvent (
+  @eventID	userIdentifier
+)
+AS
+BEGIN
+  IF NOT EXISTS(SELECT eventID FROM calendar WHERE eventID = @eventID)
+    RETURN 20000
+
+  DELETE calendar WHERE eventID = @eventID
+END
+GO
+GRANT EXECUTE ON delCalendarEvent TO vpusr
+GO
+IF OBJECT_ID('dbo.delCalendarEvent') IS NOT NULL
+	PRINT '<<< CREATED PROCEDURE dbo.delCalendarEvent >>>'
+ELSE
+	PRINT '<<< FAILED CREATING PROCEDURE dbo.delCalendarEvent >>>'
+GO

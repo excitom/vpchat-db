@@ -1,0 +1,59 @@
+/* Deletes an event vote option from the voteOptions table */
+/* input:  voteId, vote option id 
+   output: Errors:
+           - 20001: Vote is active, cannot delete options,
+*/
+CREATE PROC delVoteOption
+(
+  @voteID		numeric(10,0),
+  @voteOptionID		integer
+)
+AS
+BEGIN
+  DECLARE @status int
+  DECLARE @lastError int
+
+  BEGIN TRAN
+  /* Check that vote is not active */
+  SELECT @status = status
+    FROM eventVotes
+    WHERE voteID = @voteID
+  SELECT @lastError = @@error
+  IF @lastError != 0
+  BEGIN
+    ROLLBACK TRAN
+    RETURN @lastError
+  END 
+
+  IF @status = 1 
+  BEGIN
+    ROLLBACK TRAN
+    RETURN 20001   /* Vote is active, cannot delete options */
+  END 
+
+  /* Delete this option from the table */
+  DELETE voteOptions 
+    WHERE voteID = @voteID AND optionID = @voteOptionID
+  SELECT @lastError = @@error
+  IF @lastError != 0
+  BEGIN
+    ROLLBACK TRAN
+    RETURN @lastError
+  END 
+ 
+  /* Option Ids should always be in the range 1..num of options */
+  UPDATE voteOptions
+    SET optionID = optionID - 1
+    WHERE voteID = @voteID AND
+          optionID > @voteOptionID   
+  SELECT @lastError = @@error
+  IF @lastError != 0
+  BEGIN
+    ROLLBACK TRAN
+    RETURN @lastError
+  END 
+
+  COMMIT TRAN
+
+END
+GO

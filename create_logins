@@ -1,0 +1,69 @@
+#!/bin/sh
+
+# This script does the creation of the database logins
+
+ServicesRoot=$1
+shift
+SybaseRoot=$1
+shift
+DBAdminLogin=$1
+shift
+DBAdminPasswd=$1
+shift
+DataServer=$1
+
+sybBinDir=$SybaseRoot/bin
+
+echo creating database logins
+
+resFile=$ServicesRoot/dbSizes.txt
+
+numberOfLogins=`grep numberOfLogins= $resFile | cut -d" " -f2`
+
+echo -- create database logins > $ServicesRoot/logins.txt
+
+loginNum=1
+while [ $numberOfLogins -ge $loginNum ]
+do
+  loginName=`grep login$loginNum.name= $resFile | cut -d" " -f2`
+  loginPassword=`grep login$loginNum.password= $resFile | cut -d" " -f2`
+  
+  echo EXEC sp_addlogin \"$loginName\", \"$loginPassword\" >> $ServicesRoot/logins.txt
+  # increase loginNum
+  loginNum=`expr $loginNum + 1`
+done
+
+echo GO >> $ServicesRoot/logins.txt
+echo GO >> $ServicesRoot/logins.txt
+
+echo $sybBinDir/isql -U$DBAdminLogin -P$DBAdminPasswd -S$DataServer -i $ServicesRoot/logins.txt
+$sybBinDir/isql -U$DBAdminLogin -P$DBAdminPasswd -S$DataServer -i $ServicesRoot/logins.txt
+
+/bin/rm $ServicesRoot/logins.txt
+
+
+# #@#@#@ KLUDGE - CREATE VPPERM ACCOUNT !!!! - K L U D G E
+# #@#@#@ KLUDGE - CREATE VPPERM ACCOUNT !!!! - K L U D G E
+# #@#@#@ KLUDGE - CREATE VPPERM ACCOUNT !!!! - K L U D G E
+# #@#@#@ KLUDGE - CREATE VPPERM ACCOUNT !!!! - K L U D G E
+# #@#@#@ KLUDGE - CREATE VPPERM ACCOUNT !!!! - K L U D G E
+# #@#@#@ KLUDGE - CREATE VPPERM ACCOUNT !!!! - K L U D G E
+# #@#@#@ KLUDGE - CREATE VPPERM ACCOUNT !!!! - K L U D G E
+
+cat << ! > $ServicesRoot/create_vpperm.sql
+EXEC sp_addlogin vpperm,"chars6"
+EXEC sp_role "grant", sa_role, vpperm
+EXEC sp_role "grant", sso_role, vpperm
+EXEC sp_role "grant", oper_role, vpperm
+GO
+!
+echo creating database logins ...
+$sybBinDir/isql -U$DBAdminLogin -P$DBAdminPasswd -S$DataServer \
+ -i $ServicesRoot/create_vpperm.sql
+/bin/rm $ServicesRoot/create_vpperm.sql
+# #@#@#@ END OF KLUDGE...
+
+
+
+
+

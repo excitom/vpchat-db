@@ -1,0 +1,70 @@
+/*
+ * Remove an HTML link category
+ *
+ * INPUT: category
+ *
+ * OUTPUT: 0 = success
+ *         20001 = non-existant category or URL
+ *
+ */
+CREATE PROC delLinkCategory (
+  @category categoryIdentifier
+)
+AS
+BEGIN
+  DECLARE @description VARCHAR(128)
+  DECLARE @lastError int
+  BEGIN TRAN
+    SELECT @description = description
+      FROM linkCategories
+      WHERE category = @category
+      
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN @lastError
+    END
+      
+    IF ( @description IS NULL )
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN 20001
+    END
+
+    DELETE linkCategories WHERE category = @category
+      
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN @lastError
+    END
+
+    IF EXISTS (SELECT * FROM links WHERE category = @category)
+    BEGIN
+      DELETE links WHERE category = @category
+    END
+      
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN @lastError
+    END
+
+    IF EXISTS (SELECT * FROM html WHERE description = @description)
+    BEGIN
+      DELETE html WHERE description = @description
+    END
+      
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN @lastError
+    END
+
+  COMMIT
+END
+GO

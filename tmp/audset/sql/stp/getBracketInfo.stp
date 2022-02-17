@@ -1,0 +1,110 @@
+/*
+ * Get bracket information for a game ladder tournament
+ *
+ * Input: tournID
+ *        flag: 1 = show loser bracket
+ *              2 = show final rounds
+ *
+ * Output: 0 = success
+ *         20000 = no such event
+ */
+IF EXISTS
+ (SELECT name FROM sysobjects WHERE name = 'getBracketInfo' AND type = 'P') 
+ DROP PROC getBracketInfo
+GO  
+CREATE PROC getBracketInfo (
+	@tournID userIdentifier,
+        @bracketType tinyint=0
+)
+AS
+BEGIN
+  DECLARE @scoreFmt tinyint
+  DECLARE @notifyID userIdentifier
+
+  SELECT @notifyID = NULL
+  SELECT @notifyID = notifyID FROM tournaments WHERE tournID = @tournID
+  IF @notifyID IS NULL
+  BEGIN
+    RETURN 20000
+  END
+
+  SELECT @scoreFmt = scoreFmt
+    FROM ladders, gameTypes
+    WHERE notifyID = @notifyID
+    AND ladders.gameTypeID = gameTypes.gameTypeID
+
+  /* Team game ? */
+
+  IF @scoreFmt = 3
+  BEGIN
+    SELECT @scoreFmt AS scoreFmt, round, gameNum, seed, bracketType, winner,
+       gameID, '' AS nickName, '' AS teamMate, 0 AS confirmed,
+       0 AS quit, 0 AS tQuit
+      FROM brackets
+      WHERE tournID = @tournID
+      AND player IS NULL
+      AND bracketType = @bracketType
+    UNION
+    SELECT @scoreFmt AS scoreFmt, round, gameNum, seed, bracketType, winner,
+       gameID, 'BYE' AS nickName, 'BYE' AS teammate, 1 AS confirmed, 
+       0 AS quit, 0 AS tQuit
+      FROM brackets
+      WHERE tournID = @tournID
+      AND player = 0
+      AND bracketType = @bracketType
+    UNION
+    SELECT @scoreFmt AS scoreFmt, round, gameNum, seed, bracketType, winner,
+      gameID, u1.nickName AS nickName, u2.nickName AS teamMate, confirmed, 
+      p.quit, t.quit AS tQuit
+      FROM brackets b, teamMates t, vpusers..users u1, vpusers..users u2,
+           tournamentPlayers p
+      WHERE b.tournID = @tournID
+      AND b.tournID   = t.tournID
+      AND b.tournID   = p.tournID
+      AND b.player    = p.userID
+      AND b.player    = u1.userID
+      AND t.userID    = u2.userID
+      AND t.priUserID = b.player
+      AND bracketType = @bracketType
+    UNION
+    SELECT @scoreFmt AS scoreFmt, round, gameNum, seed, bracketType, winner,
+        gameID, nickName AS nickName, '' AS teamMate, 0 AS confirmed,
+        0 AS quit, 0 AS tQuit
+      FROM brackets b, vpusers..users u
+      WHERE b.tournID = @tournID
+      AND b.player = u.userID
+      AND bracketType = @bracketType
+      AND b.player NOT IN
+        (SELECT priUserID FROM teamMates WHERE tournID = @tournID)
+    ORDER BY round ASC, gameNum ASC
+  END
+
+  /* Non-team game */
+
+  ELSE BEGIN
+    SELECT @scoreFmt AS scoreFmt, round, gameNum, seed, bracketType,
+            winner, gameID, '' AS nickName, 0 AS quit
+      FROM brackets
+      WHERE tournID = @tournID
+      AND player IS NULL
+      AND bracketType = @bracketType
+    UNION
+    SELECT @scoreFmt AS scoreFmt, round, gameNum, seed, bracketType,
+            winner, gameID, 'BYE' AS nickName, 0 AS quit
+      FROM brackets
+      WHERE tournID = @tournID
+      AND player = 0
+      AND bracketType = @bracketType
+    UNION
+    SELECT @scoreFmt AS scoreFmt, round, gameNum, seed, bracketType,
+            winner, gameID, nickName, quit
+      FROM brackets b, vpusers..users u, tournamentPlayers p
+      WHERE b.tournID = @tournID
+      AND b.tournID = p.tournID
+      AND b.player = u.userID
+      AND b.player = p.userID
+      AND bracketType = @bracketType
+    ORDER BY round ASC, gameNum ASC
+  END
+END
+GO

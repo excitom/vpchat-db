@@ -1,0 +1,19 @@
+/*
+ * Get the name of the tournament director for a tournament
+ */
+IF EXISTS
+ (SELECT name FROM sysobjects WHERE name = 'getTDName' AND type = 'P') 
+ DROP PROC getTDName
+GO  
+CREATE PROC getTDName (
+  @tournID	userIdentifier
+)
+AS
+BEGIN
+  SELECT nickName
+    FROM vpusers..users u, tournamentPlayers p
+    WHERE tournID = @tournID
+    AND   td = 1
+    AND   p.userID = u.userID
+END
+GO

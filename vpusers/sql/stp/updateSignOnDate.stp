@@ -1,0 +1,57 @@
+/*
+ * Update the 'lastSignOnDate' for a user.
+ *
+ */
+CREATE PROC updateSignOnDate ( @userToCheck VPuserID, @signOnDate VpTime, @diffFromGMT int = NULL )
+AS
+BEGIN
+  DECLARE @lastSignOnDate	VpTime
+  DECLARE @lastError	 	int
+  DECLARE @userID		userIdentifier
+  
+  BEGIN TRAN updateSignOnDate
+    IF @diffFromGMT IS NULL
+    BEGIN
+      SELECT @diffFromGMT = gmt
+      FROM getGMT
+      
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN updateSignOnDate
+        RETURN @lastError
+      END
+      
+      IF @diffFromGMT IS NULL
+        SELECT @diffFromGMT = 0
+    END
+    
+    SELECT @lastSignOnDate = dateadd( hour, (-1) * @diffFromGMT, @signOnDate )
+        
+    SELECT @userID = userID
+      FROM users
+      WHERE nickName = @userToCheck
+      AND   registrationMode = 2
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN updateSignOnDate
+      RETURN @lastError
+    END 
+  
+    UPDATE registration
+      SET lastSignOnDate = @lastSignOnDate
+      WHERE userID = @userID
+      AND ((lastSignOnDate IS NULL) OR (lastSignOnDate < @lastSignOnDate))
+        
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN updateSignOnDate
+      RETURN @lastError
+    END 
+  COMMIT TRAN updateSignOnDate
+  
+END
+GO 

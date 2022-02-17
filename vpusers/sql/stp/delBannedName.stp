@@ -1,0 +1,21 @@
+/* add a name to the banned names list */
+/* 
+  input:  nickName
+  output: return value - 0 - success
+                         20002 - fixed banned name can't be deleted
+*/
+CREATE PROC delBannedName ( @nickName VPuserID )
+
+AS
+BEGIN
+  DECLARE @lastError int
+
+  /* turn all user ID to lower case, to get case insensitive comparisons */
+  SELECT @nickName = lower(@nickName)
+  IF ( @nickName = "__" )
+    /* can't delete service name prefix from banned names */
+    RETURN 20002
+  DELETE bannedNames 
+      WHERE nickName = @nickName
+END
+GO

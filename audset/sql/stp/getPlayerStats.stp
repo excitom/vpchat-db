@@ -1,0 +1,77 @@
+/*
+ * Get game stats for a player or group of players.
+ *
+ * Input: userID/notifyID
+ *        flag
+ *        0 => report on an individual
+ *        1 => report on all members of a ladder
+ *        2 => report on all players of a game type
+ *
+ * Output: 0 = success
+ *         20000 = player/ladder/game type not found
+ *
+ */
+IF EXISTS(SELECT name FROM sysobjects WHERE name='getPlayerStats' AND type='P')
+ DROP PROC getPlayerStats
+GO
+CREATE PROC getPlayerStats (
+	@objectID	userIdentifier,
+	@opt		integer=0
+)
+AS
+BEGIN
+  DECLARE @lastError	int
+
+  IF @opt = 1
+  BEGIN
+    IF EXISTS (SELECT * FROM ladderMembers WHERE notifyID = @objectID)
+    BEGIN
+      SELECT DISTINCT u.userID, nickName, p.won, p.lost, p.tied, rating,
+		lastGame, lastAged
+        FROM players p, ladderMembers m, vpusers..users u
+        WHERE m.notifyID = @objectID
+        AND m.userID = p.userID
+        AND p.userID = u.userID
+        AND registrationMode = 2
+        AND p.gameTypeID IN
+          (SELECT gameTypeID FROM ladders WHERE notifyID=@objectID)
+        ORDER BY rating ASC, nickName ASC
+    END
+    ELSE
+      RETURN 20000
+  END
+  IF @opt = 2
+  BEGIN
+    IF EXISTS (SELECT * FROM gameTypes WHERE gameTypeID = @objectID)
+    BEGIN
+      SELECT u.userID, nickName, p.won, p.lost, p.tied, rating
+        FROM players p, vpusers..users u
+        WHERE p.gameTypeID = @objectID
+        AND p.userID = u.userID
+        AND registrationMode = 2
+        ORDER BY rating DESC
+    END
+    ELSE
+      RETURN 20000
+  END
+  IF @opt = 0
+  BEGIN
+    IF EXISTS (SELECT * FROM players WHERE userID = @objectID)
+    BEGIN
+      SELECT u.userID, nickName, won, lost, tied, rating
+        FROM players p, vpusers..users u
+        WHERE p.userID = u.userID
+        AND registrationMode = 2
+        ORDER BY rating ASC, nickName ASC
+    END
+    ELSE
+      RETURN 20000
+  END
+
+  SELECT @lastError = @@error
+  IF @lastError != 0
+  BEGIN
+    RETURN @lastError
+  END
+END
+GO

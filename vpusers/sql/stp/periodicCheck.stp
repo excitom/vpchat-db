@@ -1,0 +1,15 @@
+/* --- do all periodic maintenance,
+       to be initiated from the users service --- */
+CREATE PROC periodicCheck
+(
+  @notEnteredDeleteAfter smallint,
+  @nonActiveDeleteAfter smallint,
+  @deletionGracePeriod smallint
+)
+AS
+BEGIN
+
+  /* check for expired/forgiven penalties, archive and notify what they are */
+  EXEC refreshPenalties
+END
+GO

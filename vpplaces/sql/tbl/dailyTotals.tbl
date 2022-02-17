@@ -1,0 +1,14 @@
+/* 
+ * Daily snapshot of key community statistics
+ *
+ */
+CREATE TABLE dailyTotals
+(
+	time		VpTime				NOT NULL,
+			CONSTRAINT dailyTotalsC UNIQUE(time,type),
+	-- data type depends on the application. look in the Perl
+	-- script that updates this table.
+	type		smallint DEFAULT 0		NOT NULL,
+	value		integer	 DEFAULT 0		NOT NULL
+)
+GO

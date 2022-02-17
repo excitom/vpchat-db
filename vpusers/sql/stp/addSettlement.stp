@@ -1,0 +1,38 @@
+/* 
+ * Record a pending payment settlement transaction. 
+ */
+CREATE PROC addSettlement (
+  @invoice	longName,
+  @orderID	varchar(20),
+  @AVS_result	varchar(10),
+  @approvalCode	varchar(6)
+)
+AS
+BEGIN
+  DECLARE @lastError int
+
+  BEGIN TRAN
+    
+    IF EXISTS (SELECT * FROM settlements WHERE invoice = @invoice)
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20000
+    END
+
+    INSERT INTO settlements
+	(invoice, orderID, AVS_result, approvalCode)
+      VALUES
+	(@invoice, @orderID, @AVS_result, @approvalCode)
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+  COMMIT TRAN
+
+  RETURN 0
+END
+GO

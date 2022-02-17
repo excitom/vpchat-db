@@ -1,0 +1,290 @@
+/*
+ * Remove an add-on service from a user account, by item ID
+ *
+ * Input: Account ID, Item ID, type
+ *
+ * Output: 0 = success
+ *         20000 = unknown account
+ *         20001 = unknown item
+ *         20003 = unknown type
+ */
+IF EXISTS
+ (SELECT name FROM sysobjects WHERE name = 'delServiceByItem' AND type = 'P') 
+ DROP PROC delServiceByItem
+GO  
+CREATE PROC delServiceByItem (
+		@accountID userIdentifier,
+		@itemID userIdentifier,
+		@type      smallint
+)
+AS
+BEGIN
+  DECLARE @lastError	int
+  DECLARE @diffFromGMT	int
+  DECLARE @retVal     	int
+  DECLARE @aid		userIdentifier
+  DECLARE @serviceID	userIdentifier
+  DECLARE @bundleID	userIdentifier
+  DECLARE @notifyID	userIdentifier
+  DECLARE @discount	float
+  DECLARE @billingCycle	int
+  DECLARE @status	int
+  DECLARE @cost		smallmoney
+  DECLARE @unitCost	smallmoney
+  DECLARE @disc		smallmoney
+  SELECT  @notifyID = NULL
+
+  BEGIN TRAN
+
+    SELECT @aid = accountID, @discount = discount, @billingCycle = billingCycle
+      FROM userAccounts
+      WHERE accountID = @accountID
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN @lastError
+    END
+
+    IF @aid != @accountID
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20000
+    END
+
+    SELECT @status    = status,
+           @unitCost  = unitCost,
+           @serviceID = serviceID,
+           @bundleID  = bundleID
+      FROM services
+      WHERE accountID = @accountID
+      AND itemID = @itemID
+      AND type = @type
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN @lastError
+    END
+
+    IF @status IS NULL
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20001
+    END
+
+    /*
+     * if part of a bundle, back out the whole thing
+     */
+    IF @bundleID IS NOT NULL
+    BEGIN
+      SELECT @serviceID = @bundleID
+      SELECT @status = NULL
+      SELECT @status    = status,
+             @unitCost  = unitCost,
+             @type      = type
+        FROM services
+        WHERE accountID = @accountID
+        AND serviceID = @serviceID
+    
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN 
+        RETURN @lastError
+      END
+
+      IF @status IS NULL
+      BEGIN
+        ROLLBACK TRAN
+        RETURN 20001	-- shouldn't happen, but check to be safe
+      END
+    END
+
+    /*
+     * check service type
+     */
+    IF @type < 1 AND @type > 6
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20003
+    END
+
+    /*
+     * back out charges if status = waiting payment
+     */
+    IF @status = 1
+    BEGIN
+      SELECT @cost = upgradeCost
+        FROM pendingServices
+        WHERE serviceID = @serviceID
+
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN 
+        RETURN @lastError
+      END
+
+      IF @cost IS NULL
+      BEGIN
+        SELECT @cost = @unitCost * @billingCycle
+        SELECT @disc = @cost * @discount
+        SELECT @cost = @cost - @disc
+      END
+      ELSE BEGIN
+        DELETE pendingServices WHERE serviceID = @serviceID
+
+        SELECT @lastError = @@error
+        IF @lastError != 0
+        BEGIN
+          ROLLBACK TRAN 
+          RETURN @lastError
+        END
+      END
+
+      SELECT @cost = round(@cost, 2)
+
+      DECLARE @comment longName
+      IF @type = 1
+      BEGIN
+        SELECT @comment = 'unpaid private alert list deleted'
+      END
+      ELSE IF @type = 2
+      BEGIN
+        SELECT @comment = 'unpaid web space deleted'
+      END
+      ELSE IF @type = 3
+      BEGIN
+        SELECT @comment = 'unpaid email forwarding deleted'
+      END
+      ELSE IF @type = 4
+      BEGIN
+        SELECT @comment = 'unpaid alert/mail/web bundle deleted'
+      END
+      ELSE IF @type = 5
+      BEGIN
+        SELECT @comment = 'unpaid presence group deleted'
+      END
+      ELSE IF @type = 6
+      BEGIN
+        SELECT @comment = 'unpaid game ladder deleted'
+      END
+
+      EXEC addPayment @accountID, @cost, @comment
+
+    END
+
+    IF @type = 4 OR @type = 1
+    BEGIN
+      /* need to mark the alert list as deleted */
+      SELECT @notifyID = itemID
+        FROM services
+        WHERE serviceID = @serviceID
+        AND   type = 1
+
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN 
+        RETURN @lastError
+      END
+    END
+
+    IF @type = 6
+    BEGIN
+      /* need to mark the ladder as deleted */
+      SELECT @notifyID = itemID
+        FROM services
+        WHERE serviceID = @serviceID
+        AND   type = 6
+
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN 
+        RETURN @lastError
+      END
+    END
+
+    IF @type = 3
+    BEGIN
+      DELETE emailForwarding WHERE serviceID = @serviceID
+    
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN 
+        RETURN @lastError
+      END
+    END
+
+    IF @type = 4
+    BEGIN
+      DELETE emailForwarding WHERE serviceID IN
+        (SELECT serviceID
+           FROM services
+           WHERE type = 3 AND bundleID = @serviceID)
+    
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN 
+        RETURN @lastError
+      END
+
+      DELETE services 
+        WHERE bundleID = @serviceID
+    
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN 
+        RETURN @lastError
+      END
+    END
+
+    DELETE services 
+      WHERE accountID = @accountID
+      AND   serviceID = @serviceID
+      AND   type = @type
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN @lastError
+    END
+
+    /*
+     * trigger service update if email forwarding was affected
+     */
+    IF @type = 3 OR @type = 4
+    BEGIN
+      INSERT emailForwardingChanges (accountID) VALUES (@accountID)
+    
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN 
+        RETURN @lastError
+      END
+    END
+
+  COMMIT TRAN
+
+  /* Deleting a service with a notify list or ladder */
+  IF @notifyID IS NOT NULL
+  BEGIN
+    IF @type = 6
+    BEGIN
+      EXEC audset..delLadder @notifyID, @accountID
+    END
+    ELSE BEGIN
+      EXEC audset..delNotifyList @notifyID
+    END
+  END
+END
+GO

@@ -1,0 +1,162 @@
+/* delete one name from a user account */
+/* input:  nickName, accountID
+   output: Return value - 0 - success 
+                          20001 - No such user existed in database
+                          20002 - Name is the account owner, can't delete
+                          20003 - Input acctID doesn't match name's acctID
+
+   Note: The name isn't really deleted, it's just set to 'locked' amd
+   the account ID is changed. This makes it unusable and removes it 
+   from the user's account, but the name is still reserved. Names are
+   not automatically released for re-use after deletion.
+*/
+CREATE PROC deleteNameFromAccount ( @nickName VPuserID, @acct userIdentifier )
+AS
+BEGIN
+  DECLARE @lastError int
+  DECLARE @userID userIdentifier
+  DECLARE @diffFromGMT int
+  DECLARE @currentDate VpTime
+  
+  SELECT @nickName = lower(@nickName)
+  
+  BEGIN TRAN
+    SELECT @diffFromGMT = gmt
+      FROM getGMT
+    IF @diffFromGMT IS NULL
+      SELECT @diffFromGMT = 0
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN @lastError
+    END
+
+    SELECT @currentDate = dateadd( hour, (-1) * @diffFromGMT, getdate() )
+
+    SELECT @userID = userID
+      FROM users
+      WHERE ( nickName = @nickName ) AND
+            ( registrationMode = 2 )
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    IF @userID IS NULL
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20001
+    END
+
+    DECLARE @accountID userIdentifier
+    SELECT @accountID = accountID
+      FROM registration
+      WHERE userID = @userID
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    DECLARE @ownerID userIdentifier
+    SELECT @ownerID = ownerID
+      FROM userAccounts
+      WHERE accountID = @accountID
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    IF @ownerID = @userID
+    BEGIN
+      /*
+       * User is an account owner, can't delete it.
+       */
+      SELECT @lastError = 20002
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    IF @accountID != @acct
+    BEGIN
+      /*
+       * The accountID for the name does not match the input accountID
+       */
+      SELECT @lastError = 20003
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+  
+    UPDATE users
+      SET locked = 1
+      WHERE userID = @userID
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+  
+    /*
+     * remove from the user's account without actually releasing the name
+     */
+    UPDATE registration
+      SET accountID = 0, deleteDate = @currentDate
+      WHERE userID = @userID
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    /*
+     * if user had privileges, remove them
+     */
+    IF EXISTS (
+      SELECT privilegeType FROM userPrivileges WHERE userID = @userID)
+    BEGIN
+      DELETE FROM userPrivileges
+        WHERE userID = @userID
+    END
+
+    /*
+     * if user had email forwarding, disable it
+     */
+    IF EXISTS (
+      SELECT email FROM emailForwarding WHERE userID = @userID)
+    BEGIN
+      UPDATE emailForwarding SET locked = 1 WHERE userID = @userID
+    END
+
+  COMMIT TRAN
+
+  /*
+   * Add a history record
+   */
+  EXEC addAcctHistory @accountID, 50, @userID, @nickName
+
+  /*
+   * if user had a home page, delete it
+   */
+  IF EXISTS (SELECT * FROM vpplaces..homePages WHERE userID = @userID)
+  BEGIN
+    DECLARE @cleanup tinyint
+    SELECT @cleanup = 1
+    EXEC vpplaces..delHomePage @userID, @cleanup
+  END
+
+END
+GO

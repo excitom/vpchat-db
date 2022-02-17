@@ -1,0 +1,131 @@
+/*
+ * Confirm a player as a team mate for a tournament team game.
+ *
+ * Input: tournID, userID, flag: 1 = confirm, 0 = decline
+ *
+ * Output: 0 = success
+ *         20000 = no such tournament
+ *         20001 = already confirmed
+ *         20002 = already registerd
+ *         20003 = not pre registered
+ *         20004 = not a ladder member
+ *         20005 = not enough points/money
+ *         20006 = unknown currency type
+ */
+IF EXISTS
+ (SELECT name FROM sysobjects WHERE name = 'confirmPlayer' AND type = 'P') 
+ DROP PROC confirmPlayer
+GO  
+CREATE PROC confirmPlayer (
+  @userID	userIdentifier,
+  @tournID	userIdentifier
+)
+AS
+BEGIN
+  DECLARE @lastError	integer
+  DECLARE @status	integer
+  DECLARE @buyIn	integer
+  DECLARE @currencyType	tinyint
+
+  BEGIN TRAN
+    SELECT @status = NULL
+    SELECT @status = status,
+             @currencyType = currencyType, @buyIn = buyIn
+      FROM tournaments
+      WHERE tournID = @tournID
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN @lastError
+    END
+
+    IF @status IS NULL
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN 20000
+    END
+
+    /* Invalid tournament event ID ? */
+    IF @status != 1
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN 20000
+    END
+
+    /* Not a member of this ladder */
+    IF NOT EXISTS (SELECT * FROM ladderMembers m, tournaments t
+			WHERE  tournID = @tournID
+                        AND t.notifyID = m.notifyID
+			AND   userID   = @userID)
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN 20004
+    END
+
+    /* Already registred */
+    IF EXISTS (SELECT * FROM tournamentPlayers
+			  WHERE tournID = @tournID
+			  AND   userID  = @userID
+			  AND        td = 0)
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN 20002
+    END
+
+    /* Already confirmed */
+    IF EXISTS (SELECT * FROM teamMates
+			  WHERE tournID = @tournID
+			  AND   userID  = @userID
+			  AND confirmed = 1)
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN 20001
+    END
+
+    /* Not pre-registered */
+    IF NOT EXISTS (SELECT * FROM teamMates
+			  WHERE tournID = @tournID
+			  AND   userID  = @userID)
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN 20003
+    END
+
+    /*
+     * If there is a buy in cost, debit the player's points.
+     */
+    IF @buyIn IS NOT NULL AND @buyIn > 0
+    BEGIN
+      IF @currencyType = 0
+      BEGIN
+        DECLARE @cost smallmoney
+        SELECT @cost = 0 - @buyIn
+        EXEC @lastError = vpusers..updateUserPoints @userID, @cost
+        IF @@trancount = 0 OR @lastError != 0
+        BEGIN
+          IF @@trancount > 0
+            ROLLBACK TRAN
+          RETURN 20005
+        END
+      END
+      ELSE BEGIN
+        ROLLBACK TRAN
+        RETURN 20006
+      END
+    END
+
+    UPDATE teamMates SET confirmed = 1
+      WHERE tournID = @tournID AND userID = @userID
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN @lastError
+    END
+
+  COMMIT TRAN
+END
+GO

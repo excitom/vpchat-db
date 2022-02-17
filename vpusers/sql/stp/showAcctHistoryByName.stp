@@ -1,0 +1,104 @@
+/*
+ * Show account history records.
+ * input:  chat name (can contain wildcards)
+ *         flag, 1 = ascending date/time, 0 = descending
+ *         from/to date/time range (default = past month)
+ *         client time zone (output date/time is relative to this TZ)
+ *
+ * output: Return value - 0 - success 
+ *		 	  20000 - can't find account 
+ *
+ */
+CREATE PROC showAcctHistoryByName ( 
+	@pattern 	longName,
+	@asc		bit = 1,
+	@from		VpTime = NULL,
+	@to		VpTime = NULL,
+	@clientTZ	int = 0
+)
+AS
+BEGIN
+  DECLARE @comment	longName
+  DECLARE @IP  		varchar(20)
+  DECLARE @who		VPuserID
+  DECLARE @name		VPuserID
+  DECLARE @time		VpTime
+  DECLARE @reason	int
+  DECLARE @value	int
+  DECLARE @whoID        userIdentifier
+  DECLARE @accountID    userIdentifier
+  DECLARE @found	bit
+
+  SELECT @found = 0
+
+  IF @from IS NULL
+  BEGIN
+    SELECT @from = getDate()
+    SELECT @from = dateadd( month, -1, @from )
+  END
+  IF @to IS NULL
+    SELECT @to = getDate()
+
+  SELECT @from = dateadd( hour, (-1) * @clientTZ, @from )
+  SELECT @to   = dateadd( hour, (-1) * @clientTZ, @to   )
+
+
+  IF @asc = 1
+  BEGIN
+    DECLARE historyCursor CURSOR
+     FOR SELECT accountID, time, reason, value, comment, whoID, IP
+         FROM accountHistory
+         WHERE value IN
+           (SELECT userID
+              FROM users
+              WHERE nickName LIKE @pattern
+              AND   registrationMode = 2
+           )
+	 AND   time >= @from
+	 AND   time <= @to
+         AND   reason = 99
+         ORDER BY time ASC
+  END
+  ELSE BEGIN
+    DECLARE historyCursor CURSOR
+     FOR SELECT accountID, time, reason, value, comment, whoID, IP
+         FROM accountHistory
+         WHERE value IN
+           (SELECT userID
+              FROM users
+              WHERE nickName LIKE @pattern
+              AND   registrationMode = 2
+           )
+	 AND   time >= @from
+	 AND   time <= @to
+         AND   reason = 99
+         ORDER BY time DESC
+  END
+
+  OPEN historyCursor
+  FETCH historyCursor INTO @accountID, @time, @reason, @value, @comment, @whoID, @IP
+  WHILE ( @@sqlstatus = 0 )
+  BEGIN
+    SELECT @found = 1
+    SELECT @name = nickName
+      FROM users
+      WHERE userID = @value
+      AND registrationMode = 2
+
+    SELECT @who = nickName
+      FROM users
+      WHERE userID = @whoID
+      AND registrationMode = 2
+
+    SELECT @accountID, dateadd( hour, @clientTZ, @time ), @comment, @name, @who, @IP
+        
+    FETCH historyCursor INTO @accountID, @time, @reason, @value, @comment, @whoID, @IP
+  END
+
+  IF @found = 0
+    RETURN 20000
+  ELSE
+    RETURN 0
+    
+END
+GO

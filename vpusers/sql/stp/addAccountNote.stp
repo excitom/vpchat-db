@@ -1,0 +1,84 @@
+/*
+ * Add a note for an account
+ *
+ * There is one of these notes per account. An 'add' when there already
+ * is a note becomes and update.
+ */
+CREATE PROC addAccountNote ( 
+	@accountID	userIdentifier,
+	@byWho		VPuserID,
+	@comment	VARCHAR(255)
+)
+AS
+BEGIN
+  DECLARE @lastError	int
+  DECLARE @diffFromGMT	int
+  DECLARE @noteDate	VpTime
+  DECLARE @userID	userIdentifier
+
+  BEGIN TRAN
+    SELECT @diffFromGMT = gmt
+      FROM getGMT
+    IF @diffFromGMT IS NULL
+      SELECT @diffFromGMT = 0
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN @lastError
+    END
+
+    SELECT @noteDate = dateadd( hour, (-1) * @diffFromGMT, getdate() )
+
+    SELECT @userID = userID
+      FROM users
+      WHERE nickName = @byWho
+      AND   registrationMode = 2
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN @lastError
+    END
+
+    IF @userID IS NULL
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20000
+    END
+
+    IF NOT EXISTS (SELECT accountID
+      FROM userAccounts
+      WHERE accountID = @accountID)
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20001
+    END
+    
+    IF EXISTS (SELECT accountID
+	FROM accountNotes
+      	WHERE accountID = @accountID)
+    BEGIN
+      UPDATE accountNotes
+        SET comment = @comment,
+            noteDate = @noteDate,
+            userID = @userID
+        WHERE accountID = @accountID
+    END
+    ELSE BEGIN
+      INSERT INTO accountNotes (accountID, userID, noteDate, comment)
+        VALUES (@accountID, @userID, @noteDate, @comment)
+    END
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+  COMMIT TRAN
+END
+GO

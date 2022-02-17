@@ -1,0 +1,16 @@
+/* find userID for a given email
+   INPUT  : email
+   OUTPUT : list of passwords from the registration table
+            for entries with this email
+*/
+CREATE PROC getUserIdByEmail ( @email longName )
+AS
+BEGIN
+  SELECT @email = lower(@email)
+  SELECT users.userID, nickName
+    FROM registration, users
+    WHERE ( email = @email ) AND
+          ( registrationMode = 2 ) AND
+          ( registration.userID = users.userID )
+END
+GO

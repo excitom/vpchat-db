@@ -1,0 +1,80 @@
+/* get record of payments for an account
+           
+          return 0 - success
+             20001 - user not found
+*/
+CREATE PROC pmtReportByAcct (
+  @accountID userIdentifier,
+  @clientTZ  int = 0,
+  @asc       bit = 1
+)
+AS
+BEGIN
+
+  DECLARE @lastError   int
+  
+  IF NOT EXISTS (
+    SELECT * FROM payments WHERE accountID = @accountID )
+  BEGIN
+    IF NOT EXISTS (
+      SELECT * FROM heldPayments WHERE accountID = @accountID )
+    BEGIN
+      RETURN 20001
+    END
+  END
+
+  IF @asc = 1
+  BEGIN
+    SELECT payments.paymentID, dateadd(hour, @clientTZ, paymentDate),amount,comment, balance,
+             AVS_result,shopperID,orderID,approvalCode, NULL, pmtType, ccID
+      FROM payments,ccPayments,runningBalance
+      WHERE accountID = @accountID
+      AND ccPayments.paymentID = payments.paymentID
+      AND runningBalance.paymentID = payments.paymentID
+    UNION
+    SELECT payments.paymentID, dateadd(hour, @clientTZ, paymentDate),amount,comment, balance,
+             NULL,NULL,NULL,NULL, NULL, NULL, NULL
+      FROM payments, runningBalance
+      WHERE accountID = @accountID
+      AND runningBalance.paymentID = payments.paymentID
+      AND NOT EXISTS (
+        SELECT * FROM ccPayments
+          WHERE ccPayments.paymentID = payments.paymentID )
+    UNION
+    SELECT paymentID, dateadd(hour, @clientTZ, paymentDate),amount,comment, 0,
+             AVS_result,shopperID,orderID,approvalCode, status, pmtType, ccID
+      FROM heldPayments
+      WHERE accountID = @accountID
+    ORDER BY dateadd(hour, @clientTZ, paymentDate) ASC, paymentID ASC
+  END
+  ELSE BEGIN
+    SELECT payments.paymentID, dateadd(hour, @clientTZ, paymentDate),amount,comment, balance,
+             AVS_result,shopperID,orderID,approvalCode, NULL, pmtType, ccID
+      FROM payments,ccPayments,runningBalance
+      WHERE accountID = @accountID
+      AND ccPayments.paymentID = payments.paymentID
+      AND runningBalance.paymentID = payments.paymentID
+    UNION
+    SELECT payments.paymentID, dateadd(hour, @clientTZ, paymentDate),amount,comment, balance,
+             NULL,NULL,NULL,NULL, NULL, NULL, NULL
+      FROM payments, runningBalance
+      WHERE accountID = @accountID
+      AND runningBalance.paymentID = payments.paymentID
+      AND NOT EXISTS (
+        SELECT * FROM ccPayments
+          WHERE ccPayments.paymentID = payments.paymentID )
+    UNION
+    SELECT paymentID, dateadd(hour, @clientTZ, paymentDate),amount,comment, 0,
+             AVS_result,shopperID,orderID,approvalCode, status, pmtType, ccID
+      FROM heldPayments
+      WHERE accountID = @accountID
+    ORDER BY dateadd(hour, @clientTZ, paymentDate) DESC, paymentID DESC
+  END
+
+  SELECT @lastError = @@error
+  IF @lastError != 0
+  BEGIN
+    RETURN @lastError
+  END
+END
+GO 

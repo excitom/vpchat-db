@@ -1,0 +1,63 @@
+/* add a new service - register, add prefix "__" and set the needed privilege */
+/* input:  service name, password, required privilege (number)
+   output: return value -
+           negative value - DB failure, 
+           0 - success,
+           20001 - user name already in DB
+*/
+CREATE PROC registerNewService
+( 
+  @nickName VPuserID,
+  @password VPPassword,
+  @privilegeType privType
+)
+AS
+BEGIN
+  DECLARE @lastError int
+  DECLARE @oldUser userIdentifier
+  
+  /* turn all user ID to lower case, to get case insensitive comparisons */
+  SELECT @nickName = lower(@nickName)
+
+  BEGIN TRAN  
+    /* find if there exists a user with that name */
+    SELECT @oldUser = userID
+      FROM users
+      WHERE ( nickName = "__" + @nickName ) AND
+            ( registrationMode = 2 )
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+    
+    IF @oldUser IS NOT NULL
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20001
+    END
+  COMMIT TRAN
+  
+  EXEC registerNewUser @nickName,@nickName,@password
+
+  BEGIN TRAN  
+    /* add prefix "__" to service name */
+    UPDATE users
+      SET nickName = "__" + nickName
+      WHERE ( nickName = @nickName ) AND
+            ( registrationMode = 2 )
+    SELECT @nickName = "__" + @nickName
+      
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+  COMMIT TRAN
+
+  EXEC addPrivilege @nickName, 2, @privilegeType
+END
+GO 

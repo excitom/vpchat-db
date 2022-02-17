@@ -1,0 +1,61 @@
+/*
+ * Check for locked/deleted players and update ranking accordingly.
+ *
+ */
+CREATE PROC updateLadderRankings
+AS
+BEGIN
+  DECLARE @lastError	int
+  DECLARE @notifyID	userIdentifier
+  DECLARE @userID	userIdentifier
+  DECLARE @i		int
+  
+  DELETE ladderMembers WHERE userID NOT IN
+    (SELECT userID FROM vpusers..registration)
+  DELETE ladderMembers WHERE userID NOT IN
+    (SELECT userID FROM vpusers..registration WHERE deleteDate IS NULL)
+  UPDATE ladderMembers SET rank = 0 WHERE userID IN
+    (SELECT userID FROM vpusers..users WHERE locked = 1)
+
+  DECLARE ladderCursor CURSOR
+    FOR SELECT l.notifyID FROM ladders l, notifyLists n
+      WHERE locked=0 AND deleted=0
+
+  DECLARE rankCursor CURSOR
+    FOR SELECT userID FROM ladderMembers
+      WHERE notifyID = @notifyID
+      AND   rank > 0
+      ORDER BY rank ASC
+
+  OPEN ladderCursor
+  FETCH ladderCursor INTO @notifyID
+  WHILE ( @@sqlstatus = 0 ) 
+  BEGIN
+    BEGIN TRAN
+      SELECT @i = 1
+      OPEN rankCursor
+      FETCH rankCursor INTO @userID
+      WHILE ( @@sqlstatus = 0 )
+      BEGIN
+        UPDATE ladderMembers
+        SET rank = @i 
+        WHERE notifyID = @notifyID
+        AND   userID   = @userID
+ 
+        SELECT @lastError = @@error
+        IF @lastError != 0
+        BEGIN
+          ROLLBACK TRAN
+          RETURN @lastError
+        END
+
+        SELECT @i = @i + 1
+        FETCH rankCursor INTO @userID
+      END
+      CLOSE rankCursor
+    COMMIT TRAN
+    FETCH ladderCursor INTO @notifyID
+  END
+  CLOSE ladderCursor
+END
+GO

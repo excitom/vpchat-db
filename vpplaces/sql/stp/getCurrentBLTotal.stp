@@ -1,0 +1,40 @@
+/* get total of buddy list users */
+CREATE PROC getCurrentBLTotal
+AS
+BEGIN
+  DECLARE @lastError int
+  DECLARE @total int
+  DECLARE @time VpTime
+  
+  BEGIN TRAN getCurrentBLTotal
+    SELECT @time = max(time)
+      FROM totalUsage
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN getCurrentBLTotal
+      SELECT BLTotal = 0
+      RETURN @lastError
+    END
+    
+    SELECT @total = BLUsage
+      FROM totalUsage
+      WHERE time = @time
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN getCurrentBLTotal
+      SELECT BLTotal = 0
+      RETURN @lastError
+    END
+    
+    IF @total IS NULL
+      SELECT @total = 0
+    
+    SELECT BLTotal = @total
+    
+  COMMIT TRAN getCurrentBLTotal
+END
+GO

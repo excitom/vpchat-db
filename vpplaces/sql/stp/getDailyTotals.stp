@@ -1,0 +1,76 @@
+/* 
+ * get daily totals data for a date or date range
+ *  INPUT  : end date, period
+ *    period = 4 => day
+ *             3 => week
+ *             2 => month
+ *             1 => quarter
+ *             0 => year
+ * Type code:
+ *      1 => 'peak online (family)'
+ *      2 => 'peak online (adult)'
+ *      11 => 'sessions (family)'
+ *      12 => 'sessions (adult)'
+ *      21 => 'unique users'
+ *      31 => 'chat minutes (family)'
+ *      32 => 'chat minutes (adult)'
+ *      40 => 'home pages'
+ *      41 => 'member profiles'
+ *      42 => 'auto-renewing subscriptions'
+ *      43 => 'active users'
+ *      50 => 'paid accounts'
+ *      51 => 'pending'
+ *      52 => 'awaiting payment'
+ *      53 => 'suspended'
+ *      54 => 'closed'
+ *      55 => 'overdue'
+ *      56 => 'new'
+ *      60 => 'complimentary'
+ *      61 => 'basic'
+ *      62 => 'family'
+ *      63 => 'sybil'
+ *      64 => 'group'
+ *      70 => '1 month'
+ *      71 => '3 month'
+ *      72 => '6 month'
+ *      71 => '3 month'
+ *      72 => '6 month'
+ *      73 => '12 month'
+ *      80 => 'monthly revenue'
+ *      81 => 'monthly paid revenue'
+ */
+CREATE PROC getDailyTotals
+(
+  @statsDate VpTime,
+  @period tinyint
+)
+AS
+BEGIN
+  DECLARE @start VpTime
+  IF @period = 4
+  BEGIN
+    SELECT time, type, value FROM dailyTotals 
+      WHERE time = @statsDate
+  END
+  IF @period = 3
+  BEGIN
+    SELECT time, type, value FROM dailyTotals 
+      WHERE time BETWEEN dateadd(week, -1, @statsDate) AND @statsDate
+  END
+  IF @period = 2
+  BEGIN
+    SELECT time, type, value FROM dailyTotals 
+      WHERE time BETWEEN dateadd(month, -1, @statsDate) AND @statsDate
+  END
+  IF @period = 1
+  BEGIN
+    SELECT time, type, value FROM dailyTotals 
+      WHERE time BETWEEN dateadd(month, -3, @statsDate) AND @statsDate
+  END
+  IF @period = 0
+  BEGIN
+    SELECT time, type, value FROM dailyTotals 
+      WHERE time BETWEEN dateadd(year, -1, @statsDate) AND @statsDate
+  END
+END
+GO 

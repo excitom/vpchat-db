@@ -1,0 +1,10 @@
+/* del all items from number and up */
+CREATE PROC delPtgItem
+(
+@serialNumber integer
+)
+AS
+  DELETE
+    FROM PTGlist
+    WHERE serialNumber >= @serialNumber
+GO 

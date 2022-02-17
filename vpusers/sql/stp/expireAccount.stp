@@ -1,0 +1,270 @@
+/* expire an account that is past renewal date
+   - if there is enough credit in the account to make the next payment,
+     use it to do so and leave the accountStatus OK
+   - else
+     -- set balance due = account cost - credit
+     -- set Pending or Overdue account status (depending on flag)
+        --- Pending is used for accounts that should auto-renew and a
+            PayPal payment is expected soon
+        --- Overdue is used otherwise, which locks the account
+
+   input:  account ID
+           flag - 1 = set Pending if balance due
+                  0 = set Overdue if balance due
+
+   paymentStatus:
+	0 = OK
+	1 = unconfirmed
+	2 = delinquent
+	3 = waiting 
+   accountStatus:
+	0 = OK
+	1 = new
+	2 = pending
+	3 = closed
+	4 = suspended - penalty
+	5 = suspended - overdue
+
+   output: Return value - 0 - success 
+			  1 - Insufficient credit to clear balance
+                          20001 - No such account existed in database
+                          20002 - Complimentary account
+                          20003 - Closed or suspended account
+*/
+CREATE PROC expireAccount ( @accountID userIdentifier, @pending bit = 0 )
+AS
+BEGIN
+  DECLARE @aid userIdentifier
+  DECLARE @paymentID userIdentifier
+  DECLARE @lastError int
+  DECLARE @diffFromGMT int
+  DECLARE @paymentDate VpTime
+  DECLARE @renewalDate VpTime
+  DECLARE @subscription smallmoney
+  DECLARE @unitCost smallmoney
+  DECLARE @addOnCost smallmoney
+  DECLARE @amount smallmoney
+  DECLARE @discount float
+  DECLARE @accountType tinyint
+  DECLARE @accountStatus tinyint
+  DECLARE @newStatus tinyint
+  DECLARE @billingCycle tinyint
+  DECLARE @updateRequired bit
+
+  SELECT @updateRequired = 0	-- default: no need to update user locks
+
+  IF @pending = 1
+    SELECT @newStatus = 2
+  ELSE
+    SELECT @newStatus = 5
+  
+  SELECT @paymentDate = getdate()
+
+  BEGIN TRAN 
+    
+    SELECT @diffFromGMT = gmt
+      FROM getGMT
+    IF @diffFromGMT IS NULL
+      SELECT @diffFromGMT = 0
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    SELECT @paymentDate = dateadd( hour, (-1) * @diffFromGMT, @paymentDate )
+
+    SELECT @aid = accountID,
+           @accountType = accountType,
+           @accountStatus = accountStatus,
+           @renewalDate = renewalDate,
+           @billingCycle = billingCycle,
+           @unitCost = unitCost,
+           @discount = discount
+      FROM userAccounts
+      WHERE accountID = @accountID
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    /* can't find account */
+    IF @accountID != @aid
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20001
+    END
+
+    /* complimentary account */
+    IF @accountType = 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20002
+    END
+
+    /* suspended or closed account */
+    IF @accountStatus = 3 OR @accountStatus = 4
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20003
+    END
+
+    /* find the current account balance (negative => credit) */
+    SELECT @subscription = subscription
+      FROM accountBalance
+      WHERE accountID = @accountID
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    /* no account balance entry (should never happen) */
+    IF @subscription IS NULL
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20001
+    END
+
+    SELECT @subscription = round(@subscription, 2)
+
+    /*
+     * find cost of add-ons, if any
+     */
+    SELECT @addOnCost = sum(unitCost)
+      FROM services
+      WHERE accountID = @accountID
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    IF @addOnCost IS NULL
+    BEGIN
+      SELECT @addOnCost = 0
+    END
+
+    /*
+     * calculate the renewal cost
+     */
+    DECLARE @cost smallmoney
+    SELECT @cost = @billingCycle * (@unitCost + @addOnCost)
+    SELECT @cost = round((@cost - (@cost * @discount)), 2)
+
+    /*
+     * record a debit for the cost
+     */
+    DECLARE @debit smallmoney
+    SELECT @debit = 0 - @cost
+    INSERT INTO payments (accountID, paymentDate, amount, comment)
+      VALUES (@accountID, @paymentDate, @debit, 'subscription renewal debit')
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+        
+    SELECT @paymentID = @@identity
+
+    /*
+     * update the balance due
+     */
+    SELECT @subscription = @subscription + @cost
+
+    UPDATE accountBalance
+      SET subscription = @subscription
+      WHERE accountID = @accountID
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    /*
+     * Update the running balance
+     */
+    DECLARE @bal smallmoney
+    SELECT @bal = 0 - @subscription
+    INSERT runningBalance (paymentID, balance) VALUES (@paymentID, @bal)
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    /*
+     * not enough credit to pay balance
+     */
+    IF @subscription > 0
+    BEGIN
+      SELECT @updateRequired = 1
+    END
+
+    /* 
+     * There was enough credit to clear the balance
+     */
+    ELSE BEGIN
+ 
+      /*
+       * set the payment status to OK
+       */
+      EXEC updatePaymentStatus @accountID, 0
+
+      /* if account was suspended for non-payment, but payment 
+       * was received, set accountStatus to OK
+       *
+       * also update account status if account was new or pending
+       */
+      IF @accountStatus = 5 OR @accountStatus = 1 OR @accountStatus = 2
+      BEGIN
+        SELECT @newStatus = 0
+        SELECT @updateRequired = 1
+      END
+      /*
+       * If past the renewal date, update the renewal date
+       */
+      IF @paymentDate >= @renewalDate
+      BEGIN
+        SELECT @renewalDate = dateadd( month, @billingCycle, @renewalDate )
+        UPDATE userAccounts
+         SET renewalDate = @renewalDate
+         WHERE accountID = @accountID
+
+        SELECT @lastError = @@error
+        IF @lastError != 0
+        BEGIN
+          ROLLBACK TRAN
+          RETURN @lastError
+        END
+      END
+      SELECT @subscription = 0	-- no balance due
+    END /* end, enough credit to clear the balance due */
+
+  COMMIT TRAN
+
+  IF @updateRequired = 1
+  BEGIN
+    EXEC updateAccountStatus @accountID, @newStatus
+  END
+
+  SELECT 'Due', @subscription
+
+  RETURN 0
+END
+GO

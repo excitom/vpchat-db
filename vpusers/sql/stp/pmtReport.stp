@@ -1,0 +1,164 @@
+/*
+ * Show payment report
+ *
+ * This is an interface for calling from an HTML GUI
+ *
+ * Payment times are saved in GMT.  When we present the expiration time/date,
+ * we want to adjust for the time zone of the web page user. When we show
+ * payments for a 'day' there may be two timezones involved, the time zone
+ * of the payment processor (e.g. PayPal or Wells Fargo, in PST) and the
+ * time zone of the person viewing the web page (typically CST).
+ *
+ * The two time zone parameters are for the client (web page viewer) TZ and
+ * the server (the payment processor).
+ */
+CREATE PROC pmtReport
+( 
+  @fromDate smalldatetime,
+  @toDate   smalldatetime,
+  @sortBy   tinyint = 0,
+  @clientTZ int = 0,
+  @serverTZ int = 0
+)
+AS
+BEGIN
+  /* sortBy 
+	0 = date/time
+  	1 = payment type
+	2 = account ID
+  */
+
+  DECLARE @lastError int
+  DECLARE @now smalldatetime
+  DECLARE @start smalldatetime
+  DECLARE @end smalldatetime
+  
+  BEGIN TRAN
+    SELECT @start = dateadd( hour, (-1) * @serverTZ,  @fromDate )
+    SELECT @end   = dateadd( hour, (-1) * @serverTZ,  @toDate )
+
+    /* ------------------------ sort by date/time ------------------------ */
+
+    IF ( @sortBy = 0 )
+    BEGIN
+      SELECT accountID, dateadd(hour, @clientTZ, paymentDate) AS date,
+             amount,comment, balance,
+             AVS_result,shopperID,orderID,approvalCode, NULL AS status, pmtType, ccID
+        FROM payments,ccPayments,runningBalance
+	WHERE paymentDate >= @start
+	AND   paymentDate <= @end
+        AND ccPayments.paymentID = payments.paymentID
+        AND runningBalance.paymentID = payments.paymentID
+      UNION
+      SELECT accountID, dateadd(hour, @clientTZ, paymentDate) AS date,
+             amount,comment, balance,
+             NULL AS AVS_result, NULL AS shopperID, NULL AS orderID, NULL AS approvalCode, NULL AS status, NULL AS pmtType, NULL AS ccID
+        FROM payments, runningBalance
+	WHERE paymentDate >= @start
+	AND   paymentDate <= @end
+        AND runningBalance.paymentID = payments.paymentID
+        AND NOT EXISTS (
+          SELECT * FROM ccPayments
+            WHERE ccPayments.paymentID = payments.paymentID )
+      UNION
+      SELECT accountID, dateadd(hour, @clientTZ, paymentDate) AS date,
+             amount,comment, 0,
+             AVS_result,shopperID,orderID,approvalCode, status, pmtType, ccID
+        FROM heldPayments
+	WHERE paymentDate >= @start
+	AND   paymentDate <= @end
+      ORDER BY dateadd(hour, @clientTZ, paymentDate) ASC
+      
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+    END
+
+    /* ----------------------- sort by payment type --------------------- */
+ 
+    IF ( @sortBy = 1 )
+    BEGIN
+      SELECT accountID, dateadd(hour, @clientTZ, paymentDate) AS date,
+             amount,comment, balance,
+             AVS_result,shopperID,orderID,approvalCode, NULL AS status, pmtType, ccID
+        FROM payments,ccPayments,runningBalance
+	WHERE paymentDate >= @start
+	AND   paymentDate <= @end
+        AND ccPayments.paymentID = payments.paymentID
+        AND runningBalance.paymentID = payments.paymentID
+      UNION
+      SELECT accountID, dateadd(hour, @clientTZ, paymentDate) AS date,
+             amount,comment, balance,
+             NULL AS AVS_result, NULL AS shopperID, NULL AS orderID, NULL AS approvalCode, NULL AS status, NULL AS pmtType, NULL AS ccID
+        FROM payments, runningBalance
+	WHERE paymentDate >= @start
+	AND   paymentDate <= @end
+        AND runningBalance.paymentID = payments.paymentID
+        AND NOT EXISTS (
+          SELECT * FROM ccPayments
+            WHERE ccPayments.paymentID = payments.paymentID )
+      UNION
+      SELECT accountID, dateadd(hour, @clientTZ, paymentDate) AS date,
+             amount,comment, 0,
+             AVS_result,shopperID,orderID,approvalCode, status, pmtType, ccID
+        FROM heldPayments
+	WHERE paymentDate >= @start
+	AND   paymentDate <= @end
+      ORDER BY pmtType ASC, dateadd(hour, @clientTZ, paymentDate) ASC
+      
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+    END
+
+    /* ------------------------ sort by account ID ---------------------- */
+  
+ 
+    IF ( @sortBy = 2 )
+    BEGIN
+      SELECT accountID, dateadd(hour, @clientTZ, paymentDate) AS date,
+             amount,comment, balance,
+             AVS_result,shopperID,orderID,approvalCode, NULL AS status, pmtType, ccID
+        FROM payments,ccPayments,runningBalance
+	WHERE paymentDate >= @start
+	AND   paymentDate <= @end
+        AND ccPayments.paymentID = payments.paymentID
+        AND runningBalance.paymentID = payments.paymentID
+      UNION
+      SELECT accountID, dateadd(hour, @clientTZ, paymentDate) AS date,
+             amount,comment, balance,
+             NULL AS AVS_result, NULL AS shopperID, NULL AS orderID, NULL AS approvalCode, NULL AS status, NULL AS pmtType, NULL AS ccID
+        FROM payments, runningBalance
+	WHERE paymentDate >= @start
+	AND   paymentDate <= @end
+        AND runningBalance.paymentID = payments.paymentID
+        AND NOT EXISTS (
+          SELECT * FROM ccPayments
+            WHERE ccPayments.paymentID = payments.paymentID )
+      UNION
+      SELECT accountID, dateadd(hour, @clientTZ, paymentDate) AS date,
+             amount,comment, 0,
+             AVS_result,shopperID,orderID,approvalCode, status, pmtType, ccID
+        FROM heldPayments
+	WHERE paymentDate >= @start
+	AND   paymentDate <= @end
+      ORDER BY accountID ASC, dateadd(hour, @clientTZ, paymentDate) ASC
+      
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+    END
+  
+
+  COMMIT TRAN
+END
+GO

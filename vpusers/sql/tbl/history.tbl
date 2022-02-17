@@ -1,0 +1,13 @@
+CREATE TABLE history
+(
+	penaltyID	integer				NOT NULL
+                        constraint isPrimary primary key,
+	userID		userIdentifier			NOT NULL,
+	penaltyType	penType				NOT NULL,
+	expiresOn	VpTime			NULL,
+	issuedOn	VpTime			NOT NULL,
+	issuedBy	userIdentifier			NOT NULL,
+	forgiven	bit 		default 0	NOT NULL,
+	comment		longName			NULL
+)
+GO

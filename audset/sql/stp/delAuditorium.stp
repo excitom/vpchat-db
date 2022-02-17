@@ -1,0 +1,53 @@
+/* delete an auditorium -
+   related data will be deleted through the 
+   delAuditoriumData trigger. Also, add a record in the auditorium
+   changes table. */
+/* input:  auditorium id
+   output: name, client name, background, title,
+   welcome message, show on PTG flag, row size, # of rows
+*/
+CREATE PROC delAuditorium ( @auditoriumID numeric(6,0) )
+AS
+BEGIN
+  DECLARE @audURL    longName
+  DECLARE @lastError int 
+  BEGIN TRAN
+    SELECT @audURL = background
+      FROM auditoriums
+      WHERE auditoriumID = @auditoriumID
+    SELECT @lastError = @@error
+    IF @lastError != 0 
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    EXEC vpplaces..delPersistentPlace @audURL
+    SELECT @lastError = @@error
+    IF @lastError != 0 
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    DELETE auditoriums
+      WHERE auditoriumID = @auditoriumID
+    SELECT @lastError = @@error
+    IF @lastError != 0 
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+  
+    INSERT auditoriumChanges
+      VALUES ( @auditoriumID, -1 )
+    SELECT @lastError = @@error
+    IF @lastError != 0 
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+  COMMIT TRAN
+  
+END
+GO

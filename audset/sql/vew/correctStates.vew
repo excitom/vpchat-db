@@ -1,0 +1,7 @@
+CREATE VIEW correctStates
+AS
+  SELECT eventState.eventID, stateID
+    FROM eventState, lastStateChanges
+  WHERE eventState.eventID = lastStateChanges.eventID AND
+        eventState.time = lastStateChanges.changeTime
+GO

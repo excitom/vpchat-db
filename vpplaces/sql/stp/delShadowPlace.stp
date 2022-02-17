@@ -1,0 +1,6 @@
+/* add a shadow place entry */
+CREATE PROC delShadowPlace ( @URL longName )
+AS
+  DELETE shadowPlaces
+    WHERE URL = @URL
+GO 

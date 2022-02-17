@@ -1,0 +1,79 @@
+/*
+ * Add an account history record.
+ * input:  accountID
+ * 	   reason code
+ *	   integer value
+ *	   - optional
+ *	   - ex: WF ID, ccID, etc.
+ *	   - depends on the reason code
+ *	   comment
+ *	   date/time stamp
+ *	   - if null, use 'now'
+ *         flag: 0 = time is local, 1 = time is GMT
+ *
+ * Reason codes:
+ *	Use the showAcctHistoryDescr stored procedure to see the full
+ *      list, or SELECT reason,comment FROM accountHistory WHERE accountID=-1
+ *
+ * output: Return value - 0 - success 
+ *
+ */
+IF EXISTS
+ (SELECT name FROM sysobjects WHERE name = 'addAcctHistory' AND type = 'P') 
+ DROP PROC addAcctHistory
+GO  
+CREATE PROC addAcctHistory ( 
+	@accountID	userIdentifier,
+	@reason		smallint,
+	@value		userIdentifier  = 0,
+	@comment	longName = NULL,
+	@time		VpTime   = NULL,
+        @isGMT          bit      = 0
+)
+AS
+BEGIN
+  DECLARE @lastError	int
+  DECLARE @diffFromGMT  int
+
+  IF @isGMT = 1
+  BEGIN
+    SELECT @diffFromGMT = 0
+  END
+  ELSE BEGIN
+    SELECT @diffFromGMT = gmt
+      FROM getGMT
+    IF @diffFromGMT IS NULL
+      SELECT @diffFromGMT = 0
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      RETURN @lastError
+    END
+  END
+
+  IF @time IS NULL
+  BEGIN
+    SELECT @time = dateadd( hour, (-1) * @diffFromGMT, getdate() )
+  END
+  ELSE BEGIN
+    SELECT @time = dateadd( hour, (-1) * @diffFromGMT, @time )
+  END
+    
+  BEGIN TRAN
+    
+    INSERT INTO accountHistory ( time, accountID, reason, value, comment )
+      VALUES ( @time, @accountID, @reason, @value, @comment )
+       
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+  COMMIT TRAN
+END
+GO
+GRANT EXECUTE ON addAcctHistory TO audset
+GO

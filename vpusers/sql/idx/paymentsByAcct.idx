@@ -1,0 +1,4 @@
+/* index payments by account ID */
+create index paymentsByAcctIdx
+on payments ( accountID )
+GO

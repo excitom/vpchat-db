@@ -1,0 +1,23 @@
+/*
+ * Keep track of renewal rate and free trial conversion rate.
+ *
+ * This information was not collected from day one, so the 'oldAcct'
+ * flag indicates accounts for which the data is incomplete.
+ *
+ */
+CREATE TABLE renewals
+(
+	accountID		userIdentifier
+                        	constraint isPrimary primary key,
+	freeTrial		bit,
+	oldAcct			bit,
+	months			integer				NOT NULL,
+	renewals		smallInt			NOT NULL,
+	wentOverdue		smallInt			NOT NULL,
+	upgrades		smallInt			NOT NULL,
+	goodChecks		smallInt			NOT NULL,
+	badChecks		smallInt			NOT NULL,
+	namesAdded		smallInt			NOT NULL,
+	chargebacks		smallInt			NOT NULL
+)
+GO

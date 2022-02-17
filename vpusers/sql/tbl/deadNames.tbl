@@ -1,0 +1,17 @@
+/*
+ * This is a list of names that have been specifically deleted 
+ * and should never be recycled.
+ *
+ * This differs from the Banned Names table, that contains strings
+ * which should not be used as a prefix in a user name. The Banned
+ * Names table also contains the word filtering list.
+ *
+ * For example, 'guide-' may be prohibited as a name prefix in
+ * Banned Names, but specific names are listed here. 
+ */
+CREATE TABLE deadNames
+(
+	nickName	VPuserID				NOT NULL
+                        constraint isPrimary primary key
+)
+GO

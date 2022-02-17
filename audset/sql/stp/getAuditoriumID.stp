@@ -1,0 +1,9 @@
+CREATE PROC getAuditoriumID 
+(
+  @background longName
+)
+AS
+  SELECT auditoriumID
+    FROM auditoriums
+    WHERE @background = background
+GO

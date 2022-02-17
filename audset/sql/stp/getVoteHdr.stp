@@ -1,0 +1,12 @@
+/* gets the header information for a specific vote */
+/* input:  vote id
+   output: title, description, numChoices, status
+*/
+CREATE PROC getVoteHdr ( @voteID numeric(10,0) )
+AS
+BEGIN
+  SELECT title, description, numChoices, status
+    FROM eventVotes
+    WHERE voteID = @voteID
+END
+GO

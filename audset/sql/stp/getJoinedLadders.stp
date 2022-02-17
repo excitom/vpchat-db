@@ -1,0 +1,26 @@
+/*
+ * Get game ladders that a users has joined
+ *
+ */
+CREATE PROC getJoinedLadders (
+	@userID		userIdentifier
+)
+AS
+BEGIN
+  SELECT n.notifyID, ladderName, notifyPref, gameTypeID,
+		won, lost, tied, rank, pending, email
+        FROM notifySubscrs n, ladders l, ladderMembers m
+        WHERE n.userID = @userID
+        AND   n.userID = m.userID
+        AND   n.notifyID = m.notifyID
+        AND   n.notifyID = l.notifyID
+  UNION
+  SELECT p.notifyID, ladderName, notifyPref, gameTypeID,
+		0, 0, 0, 0, pending, email
+        FROM pendingListSubscrs p, ladders l, ladderMembers m
+        WHERE p.userID = @userID
+        AND   p.userID = m.userID
+        AND   p.notifyID = m.notifyID
+        AND   p.notifyID = l.notifyID
+END
+GO

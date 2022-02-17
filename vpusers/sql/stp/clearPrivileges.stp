@@ -1,0 +1,12 @@
+/* Clear from database all privilege records for all users, 
+   either registered or others, with the excpetion
+   of the Services and the vpmanager                */
+CREATE PROC clearPrivileges
+AS
+  DELETE userPrivileges
+    FROM userPrivileges, users
+    WHERE ( userPrivileges.userID = users.userID )  AND
+          ( ( registrationMode != 2 ) OR
+            ( ( substring(nickName,1,2) != "__" ) AND
+              ( nickName != "vpmanager" ) ) )
+GO

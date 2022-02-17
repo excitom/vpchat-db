@@ -1,0 +1,59 @@
+/*
+ * Return a list of the notify lists to which a user is subscribed
+ *
+ */
+CREATE PROC getNotifyListsByUser (
+	@nickName	VPuserID,
+	@listType	tinyint = 2
+	-- 0 = public only
+	-- 1 = private only
+	-- 2 = both
+)
+AS
+BEGIN
+  SELECT @nickName = lower(@nickName)
+  SELECT @nickName = ltrim(@nickName)
+
+  IF @listType = 2
+  BEGIN
+    SELECT n.notifyID, description, subheader, type, notifyPref
+      FROM notifyLists n, notifySubscrs, vpusers..users
+      WHERE nickName = @nickName
+      AND   registrationMode = 2
+      AND   vpusers..users.userID = notifySubscrs.userID
+      AND   notifySubscrs.notifyID = n.notifyID
+      AND   n.deleted = 0
+      ORDER BY description ASC
+      RETURN 0
+  END
+  /*
+   * private only
+   */
+  IF @listType = 1
+  BEGIN
+    SELECT n.notifyID, description, subheader, type, notifyPref
+      FROM notifyLists n, notifySubscrs, vpusers..users
+      WHERE nickName = @nickName
+      AND   registrationMode = 2
+      AND   vpusers..users.userID = notifySubscrs.userID
+      AND   notifySubscrs.notifyID = n.notifyID
+      AND   n.deleted = 0
+      AND   n.type & 0x00000040 = 0x00000040
+      ORDER BY description ASC
+      RETURN 0
+  END
+  /*
+   * public only
+   */
+  SELECT n.notifyID, description, subheader, type, notifyPref
+    FROM notifyLists n, notifySubscrs, vpusers..users
+    WHERE nickName = @nickName
+    AND   registrationMode = 2
+    AND   vpusers..users.userID = notifySubscrs.userID
+    AND   notifySubscrs.notifyID = n.notifyID
+    AND   n.deleted = 0
+    AND   n.type & 0x00000040 = 0
+    ORDER BY description ASC
+    RETURN 0
+END
+GO

@@ -1,0 +1,45 @@
+/* 
+ * Record a pending payment transaction. 
+ */
+CREATE PROC addTransaction (
+  @accountID	userIdentifier,
+  @ccID		userIdentifier,
+  @type		tinyint,
+  @amount	smallmoney,
+  @invoice	longName,
+  @IP           varchar(20)
+)
+AS
+BEGIN
+  DECLARE @lastError int
+
+  BEGIN TRAN
+    
+    IF EXISTS (SELECT * FROM transactions WHERE invoice = @invoice)
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20000
+    END
+    IF NOT EXISTS (SELECT * FROM userAccounts WHERE accountID = @accountID)
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20001
+    END
+
+    INSERT INTO transactions
+	(invoice, accountID, IP, ccID, type, amount, completed)
+      VALUES
+	(@invoice, @accountID, @IP, @ccID, @type, @amount, 0)
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+  COMMIT TRAN
+
+  RETURN 0
+END
+GO

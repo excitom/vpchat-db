@@ -1,0 +1,22 @@
+/*
+ * Get notify lists to which a user is subscribed.
+ *
+ * A distinction may be made between a private alert list and an
+ * alert list associated with a game ladder. 
+ *
+ */
+CREATE PROC getNotifySubscrsByName (
+	@nickName	VPuserID,
+	@type		int = 0x00000040	-- default = private alert list
+)
+AS
+BEGIN
+  SELECT n.notifyID, description, subheader, notifyPref
+        FROM notifySubscrs n, notifyLists nl, vpusers..users
+        WHERE nickName = @nickName
+        AND   registrationMode = 2
+        AND   n.userID=vpusers..users.userID
+        AND   n.notifyID=nl.notifyID
+	AND   nl.type & @type = @type
+END
+GO

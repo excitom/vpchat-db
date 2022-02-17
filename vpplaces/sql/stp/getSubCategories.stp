@@ -1,0 +1,17 @@
+/* delete a category - related data will be 
+   removed by the delCategoryData trigger */
+/*
+  INPUT  : parentCategory or NULL for root categories
+  OUTPUT : list of sub-categories for that category,
+           stating for each - category, description
+*/
+CREATE PROC getSubCategories
+(
+  @parentCategory categoryIdentifier = NULL
+)
+AS
+  SELECT category, description
+    FROM categories
+    WHERE ( parentCategeory = @parentCategory )
+    ORDER BY description
+GO 

@@ -1,0 +1,6 @@
+CREATE TABLE shadowPlaces
+(
+	URL		varchar(255)			NOT NULL
+                        constraint isPrimary primary key
+)
+GO

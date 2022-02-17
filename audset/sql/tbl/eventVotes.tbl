@@ -1,0 +1,11 @@
+CREATE TABLE eventVotes
+(
+	voteID		numeric(10,0)			IDENTITY
+                        constraint isPrimary primary key,
+	eventID		eventIdentifier			NOT NULL,
+	title		varchar(50)			NOT NULL,
+	description	varchar(200)			NOT NULL,
+	numChoices      integer		                NOT NULL,
+        status	        integer		                NULL
+)
+GO

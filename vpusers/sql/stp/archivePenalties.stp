@@ -1,0 +1,19 @@
+/* --- archive ALL the penalties that have expired --- */
+CREATE PROC archivePenalties
+(
+@currentTime VpTime
+)
+AS
+BEGIN
+ BEGIN TRAN
+
+ INSERT INTO history
+   SELECT * FROM penalties
+   WHERE expiresOn <= @currentTime OR
+         forgiven=1
+ DELETE FROM penalties
+   WHERE expiresOn <= @currentTime OR
+         forgiven=1
+ COMMIT TRAN
+END
+GO 

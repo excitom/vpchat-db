@@ -1,0 +1,9 @@
+CREATE VIEW eventTimes
+AS
+  SELECT DISTINCT events.eventID,
+         min(eventState.time) AS startTime,
+         max(eventState.time) AS endTime
+    FROM events, eventState
+    WHERE events.eventID = eventState.eventID
+    GROUP BY events.eventID
+GO

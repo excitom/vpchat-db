@@ -1,0 +1,212 @@
+/* get credit card or echeck information about a user account
+ Input: accountID, flag -> 1=return info about active subscr only
+ Output: several result sets
+           
+          return 0 - success
+             20001 - account not found
+             20004 - bad credit
+*/
+CREATE PROC getCreditInfoByAcctID ( @accountID userIdentifier, @active bit = 0 )
+AS
+BEGIN
+
+  DECLARE @lastError   int
+  DECLARE @rc  int
+  SELECT @rc = 0
+
+  DECLARE @ccID             userIdentifier
+  DECLARE @Ecom_billto_online_email	VARCHAR(75)
+  DECLARE @Ecom_billto_city		VARCHAR(50)
+  DECLARE @Ecom_billto_countrycode	CHAR(2)
+  DECLARE @Ecom_billto_name_first	VARCHAR(50)
+  DECLARE @Ecom_billto_name_last	VARCHAR(50)
+  DECLARE @Ecom_billto_postalcode	VARCHAR(20)
+  DECLARE @Ecom_billto_stateprov	VARCHAR(30)
+  DECLARE @Ecom_billto_street_line1	VARCHAR(50)
+  DECLARE @Ecom_billto_phone_number	VARCHAR(16)
+  DECLARE @Ecom_card_expdate_month	tinyint
+  DECLARE @Ecom_card_expdate_year	smallint
+  DECLARE @Ecom_card_name		VARCHAR(50)
+  DECLARE @Ecom_card_number		VARCHAR(19)
+  DECLARE @Ecom_card_verification	VARCHAR(4)
+  DECLARE @IOC_CVV_indicator		tinyint
+  DECLARE @IOC_buyer_type		CHAR(1)
+  DECLARE @type 			tinyint
+
+  BEGIN TRAN
+  
+    IF @active = 1
+    BEGIN
+      SELECT @ccID = ccID,
+             @type = type
+        FROM subscriptions
+        WHERE accountID = @accountID
+        AND autoRenew = @active
+    END
+    ELSE BEGIN
+      SELECT @ccID = ccID,
+             @type = type
+        FROM subscriptions
+        WHERE accountID = @accountID
+    END
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+
+    IF @ccID = NULL
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20001
+    END
+
+    IF @type = 2
+    BEGIN
+      IF EXISTS (
+        SELECT * FROM badCredit WHERE ccID = @ccID AND type = 2
+      )
+      BEGIN
+        SELECT @rc = 20004
+      END
+
+      SELECT @ccID = ccID,
+             @Ecom_billto_online_email   = Ecom_billto_online_email,
+             @Ecom_billto_city = Ecom_billto_city,
+             @Ecom_billto_countrycode = Ecom_billto_countrycode,
+             @Ecom_billto_name_first = Ecom_billto_name_first,
+             @Ecom_billto_name_last = Ecom_billto_name_last,
+             @Ecom_billto_postalcode = Ecom_billto_postalcode,
+             @Ecom_billto_stateprov = Ecom_billto_stateprov,
+             @Ecom_billto_street_line1 = Ecom_billto_street_line1,
+             @Ecom_billto_phone_number = Ecom_billto_phone_number,
+             @IOC_buyer_type = IOC_buyer_type,
+             @Ecom_card_name = Ecom_card_name,
+             @Ecom_card_expdate_month = Ecom_card_expdate_month,
+             @Ecom_card_expdate_year = Ecom_card_expdate_year,
+             @Ecom_card_number = Ecom_card_number,
+             @Ecom_card_verification = Ecom_card_verification,
+             @IOC_CVV_indicator = IOC_CVV_indicator
+        FROM creditCards
+        WHERE ccID = @ccID
+
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+
+      IF @ccID IS NOT NULL
+      BEGIN
+        SELECT 'CC', @ccID
+        SELECT 'CC00', @Ecom_billto_online_email
+        SELECT 'CC01', @Ecom_billto_city
+        SELECT 'CC02', @Ecom_billto_countrycode
+        SELECT 'CC03', @Ecom_billto_name_first
+        SELECT 'CC04', @Ecom_billto_name_last
+        SELECT 'CC05', @Ecom_billto_postalcode
+        SELECT 'CC06', @Ecom_billto_stateprov
+        SELECT 'CC07', @Ecom_billto_street_line1
+        SELECT 'CC08', @Ecom_billto_phone_number
+        SELECT 'CC09', @IOC_buyer_type
+        SELECT 'CC10', @Ecom_card_name
+        SELECT 'CC11', @Ecom_card_expdate_month
+        SELECT 'CC12', @Ecom_card_expdate_year
+        SELECT 'CC13', @Ecom_card_number
+        SELECT 'CC14', @Ecom_card_verification
+        SELECT 'CC15', @IOC_CVV_indicator
+      END
+    END
+    ELSE BEGIN
+      /* type = eCheck */
+      IF EXISTS (
+        SELECT * FROM badCredit WHERE ccID = @ccID AND type = 3
+      )
+      BEGIN
+        SELECT @rc = 20004
+      END
+
+      DECLARE @ecID             	userIdentifier
+      DECLARE @IOC_business_name	VARCHAR(50)
+      DECLARE @IOC_DDA_acct_name	VARCHAR(50)
+      DECLARE @IOC_DDA_acct_number	VARCHAR(17)
+      DECLARE @IOC_DDA_acct_type	VARCHAR(2)
+      DECLARE @IOC_id_option		VARCHAR(1)
+      DECLARE @IOC_DDA_bankname		VARCHAR(20)
+      DECLARE @IOC_DDA_DLnumber		VARCHAR(20)
+      DECLARE @IOC_DDA_DLstate		VARCHAR(65)
+      DECLARE @IOC_DDA_DOB		VARCHAR(10)
+      DECLARE @IOC_DDA_routing		VARCHAR(10)
+      DECLARE @IOC_DDA_SSN		VARCHAR(20)
+      DECLARE @IOC_DDA_taxID		VARCHAR(20)
+  
+      SELECT @ecID = ecID,
+         @Ecom_billto_online_email   = Ecom_billto_online_email,
+         @Ecom_billto_city = Ecom_billto_city,
+         @Ecom_billto_countrycode = Ecom_billto_countrycode,
+         @Ecom_billto_name_first = Ecom_billto_name_first,
+         @Ecom_billto_name_last = Ecom_billto_name_last,
+         @Ecom_billto_postalcode = Ecom_billto_postalcode,
+         @Ecom_billto_stateprov = Ecom_billto_stateprov,
+         @Ecom_billto_street_line1 = Ecom_billto_street_line1,
+         @Ecom_billto_phone_number = Ecom_billto_phone_number,
+         @IOC_buyer_type = IOC_buyer_type,
+         @IOC_business_name = IOC_business_name,
+         @IOC_DDA_acct_number = IOC_DDA_acct_number,
+         @IOC_DDA_acct_name = IOC_DDA_acct_name,
+         @IOC_DDA_acct_type = IOC_DDA_acct_type,
+         @IOC_id_option = IOC_id_option,
+         @IOC_DDA_bankname = IOC_DDA_bankname,
+         @IOC_DDA_DLnumber = IOC_DDA_DLnumber,
+         @IOC_DDA_DLstate = IOC_DDA_DLstate,
+         @IOC_DDA_DOB = IOC_DDA_DOB,
+         @IOC_DDA_routing = IOC_DDA_routing,
+         @IOC_DDA_SSN = IOC_DDA_SSN,
+         @IOC_DDA_taxID = IOC_DDA_taxID
+        FROM echecks
+        WHERE ecID = @ccID
+
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+
+      IF @ecID IS NOT NULL
+      BEGIN
+
+        SELECT 'EC', @ecID
+        SELECT 'EC00', @Ecom_billto_online_email
+        SELECT 'EC01', @Ecom_billto_city
+        SELECT 'EC02', @Ecom_billto_countrycode
+        SELECT 'EC03', @Ecom_billto_name_first
+        SELECT 'EC04', @Ecom_billto_name_last
+        SELECT 'EC05', @Ecom_billto_postalcode
+        SELECT 'EC06', @Ecom_billto_stateprov
+        SELECT 'EC07', @Ecom_billto_street_line1
+        SELECT 'EC08', @Ecom_billto_phone_number
+        SELECT 'EC09', @IOC_buyer_type
+        SELECT 'EC10', @IOC_business_name
+        SELECT 'EC11', @IOC_DDA_acct_name
+        SELECT 'EC12', @IOC_DDA_acct_number
+        SELECT 'EC13', @IOC_DDA_bankname
+        SELECT 'EC14', @IOC_DDA_DLnumber
+        SELECT 'EC15', @IOC_DDA_DLstate
+        SELECT 'EC16', @IOC_DDA_DOB
+        SELECT 'EC17', @IOC_DDA_routing
+        SELECT 'EC18', @IOC_DDA_SSN
+        SELECT 'EC19', @IOC_DDA_taxID
+        SELECT 'EC20', @IOC_DDA_acct_type
+        SELECT 'EC21', @IOC_id_option
+      END
+    END
+  COMMIT TRAN
+
+  RETURN @rc
+END
+GO 

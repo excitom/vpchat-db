@@ -1,0 +1,189 @@
+/* add or update electronic check information
+   input:  fields from the Ecom form
+
+   PHP version
+
+   flag: 1 = override current information for the same account number
+
+   The accountID parameter is used to make a history record, tieing this
+   electronic check to an account for future reference, but the accountID is
+   not part of the ec record since the card may be shared among multiple
+   accounts.
+
+   output: Return value - 0 - success 
+		 	  20000 - Duplicate acct/routing
+			  20001 - card is on the bad credit list
+
+	The ecID number is written to output.
+*/
+CREATE PROC addECheck_p ( 
+	@Ecom_online_email	VARCHAR(75),
+	@Ecom_city		VARCHAR(50),
+	@Ecom_countrycode	CHAR(2),
+	@Ecom_name_first	VARCHAR(50),
+	@Ecom_name_last		VARCHAR(50),
+	@Ecom_postalcode	VARCHAR(20),
+	@Ecom_stateprov		VARCHAR(30),
+	@Ecom_street_line1	VARCHAR(50),
+	@Ecom_phone_number	VARCHAR(16),
+	@IOC_buyer_type		CHAR(1),
+	@IOC_id_option		CHAR(1),
+	@IOC_business_name	VARCHAR(50),
+	@IOC_DDA_acct_name	VARCHAR(50),
+	@IOC_DDA_acct_number	VARCHAR(17),
+	@IOC_DDA_acct_type	CHAR(2),
+	@IOC_DDA_bankname	VARCHAR(20),
+	@IOC_DDA_DLnumber	VARCHAR(20),
+	@IOC_DDA_DLstate	VARCHAR(65),
+	@IOC_DDA_DOB		VARCHAR(10),
+	@IOC_DDA_routing	VARCHAR(10),
+	@IOC_DDA_SSN		VARCHAR(20),
+	@IOC_DDA_taxID		VARCHAR(20),
+        @update			bit = FALSE,
+	@accountID		userIdentifier = 0
+)
+AS
+BEGIN
+  DECLARE @ecID 		userIdentifier
+  DECLARE @lastError		int
+
+  BEGIN TRAN
+    
+    /* existing checking account ? */
+    SELECT @ecID = ecID
+      FROM echecks
+      WHERE IOC_DDA_acct_number = @IOC_DDA_acct_number
+      AND IOC_DDA_routing = @IOC_DDA_routing
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    IF @ecID IS NULL
+    BEGIN
+      /* this is a new card number */
+      INSERT INTO echecks (
+	Ecom_billto_online_email,
+	Ecom_billto_city,
+	Ecom_billto_countrycode,
+	Ecom_billto_name_first,
+	Ecom_billto_name_last,
+	Ecom_billto_postalcode,
+	Ecom_billto_stateprov,
+	Ecom_billto_street_line1,
+	Ecom_billto_phone_number,
+	IOC_buyer_type,
+	IOC_id_option,
+	IOC_business_name,
+	IOC_DDA_acct_name,
+	IOC_DDA_acct_number,
+	IOC_DDA_acct_type,
+	IOC_DDA_bankname,
+	IOC_DDA_DLnumber,
+	IOC_DDA_DLstate,
+	IOC_DDA_DOB,
+	IOC_DDA_routing,
+	IOC_DDA_SSN,
+	IOC_DDA_taxID
+      )
+      VALUES (
+	@Ecom_online_email,
+	@Ecom_city,
+	@Ecom_countrycode,
+	@Ecom_name_first,
+	@Ecom_name_last,
+	@Ecom_postalcode,
+	@Ecom_stateprov,
+	@Ecom_street_line1,
+	@Ecom_phone_number,
+	@IOC_buyer_type,
+	@IOC_id_option,
+	@IOC_business_name,
+	@IOC_DDA_acct_name,
+	@IOC_DDA_acct_number,
+	@IOC_DDA_acct_type,
+	@IOC_DDA_bankname,
+	@IOC_DDA_DLnumber,
+	@IOC_DDA_DLstate,
+	@IOC_DDA_DOB,
+	@IOC_DDA_routing,
+	@IOC_DDA_SSN,
+	@IOC_DDA_taxID
+      )
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+
+      /* get the new ecID */
+      SELECT @ecID = @@identity
+
+      COMMIT TRAN
+
+      /* add a history record */
+      EXEC addAcctHistory @accountID, 37, @ecID
+
+    END
+    ELSE BEGIN
+      /* check if this account is in the bad credit list */
+      IF EXISTS (SELECT * FROM badCredit WHERE ccID = @ecID AND type = 3)
+      BEGIN
+        ROLLBACK TRAN
+        RETURN 20001
+      END
+      /* overwrite fields if the Update flag is TRUE */
+      IF @update = 1
+      BEGIN
+        UPDATE echecks
+          SET
+	    Ecom_billto_online_email = @Ecom_online_email,
+	    Ecom_billto_city         = @Ecom_city,
+	    Ecom_billto_countrycode  = @Ecom_countrycode,
+	    Ecom_billto_name_first   = @Ecom_name_first,
+	    Ecom_billto_name_last    = @Ecom_name_last,
+	    Ecom_billto_postalcode   = @Ecom_postalcode,
+	    Ecom_billto_stateprov    = @Ecom_stateprov,
+	    Ecom_billto_street_line1 = @Ecom_street_line1,
+	    Ecom_billto_phone_number = @Ecom_phone_number,
+	    IOC_buyer_type           = @IOC_buyer_type,
+	    IOC_business_name	     = @IOC_business_name,
+	    IOC_DDA_acct_name	     = @IOC_DDA_acct_name,
+	    IOC_DDA_acct_number	     = @IOC_DDA_acct_number,
+	    IOC_DDA_acct_type	     = @IOC_DDA_acct_type,
+	    IOC_DDA_bankname	     = @IOC_DDA_bankname,
+	    IOC_DDA_DLnumber	     = @IOC_DDA_DLnumber,
+	    IOC_DDA_DLstate	     = @IOC_DDA_DLstate,
+	    IOC_DDA_DOB		     = @IOC_DDA_DOB,
+	    IOC_DDA_SSN		     = @IOC_DDA_SSN,
+	    IOC_DDA_taxID	     = @IOC_DDA_taxID
+          WHERE ecID = @ecID
+
+        SELECT @lastError = @@error
+        IF @lastError != 0
+        BEGIN
+          ROLLBACK TRAN
+          RETURN @lastError
+        END
+
+        COMMIT TRAN
+
+        /* add a history record */
+        EXEC addAcctHistory @accountID, 39, @ecID
+
+      END
+      /* duplicate eCheck and update=false */
+      ELSE BEGIN
+        ROLLBACK TRAN
+        RETURN 20000
+      END
+    END
+
+  SELECT @ecID AS ecID
+  RETURN 0
+END
+GO

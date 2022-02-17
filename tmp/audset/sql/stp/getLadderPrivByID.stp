@@ -1,0 +1,31 @@
+/*
+ * Get the access list for a game ladder
+ *
+ */
+IF EXISTS
+ (SELECT name FROM sysobjects WHERE name = 'getLadderPrivByID' AND type = 'P') 
+ DROP PROC getLadderPrivByID
+GO  
+CREATE PROC getLadderPrivByID (
+	@notifyID	userIdentifier
+)
+AS
+BEGIN
+  DECLARE @lastError int
+  BEGIN TRAN
+    SELECT notifyAccessList.userID, nickName, accountID, notifyAccessList.locked, maxMsgs, msgInterval, accessPriv
+      FROM notifyAccessList, vpusers..users
+      WHERE notifyID = @notifyID
+      AND   notifyAccessList.userID = vpusers..users.userID
+      AND   registrationMode = 2
+      ORDER BY nickName ASC
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+  COMMIT TRAN
+END
+GO

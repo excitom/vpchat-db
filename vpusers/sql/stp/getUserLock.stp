@@ -1,0 +1,21 @@
+/*
+ * Let the vpplaces user peek into the users table to see the lock flag
+ *
+ */
+CREATE PROC getUserLock ( @userID userIdentifier )
+AS
+BEGIN
+  DECLARE @locked int
+  SELECT @locked = NULL
+  SELECT @locked = locked FROM users WHERE userID = @userID
+  IF @locked IS NULL
+  BEGIN
+    RETURN -1
+  END
+  ELSE BEGIN
+    RETURN @locked
+  END
+END
+GO
+GRANT EXECUTE ON getUserLock TO vpplaces
+GO

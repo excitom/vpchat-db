@@ -1,0 +1,8 @@
+CREATE VIEW privilegesWithNames
+AS
+  SELECT nickName AS Name, registrationMode AS Mode,
+         description AS Privilege
+    FROM userPrivileges, users, privilegeTypes
+    WHERE userPrivileges.privilegeType = privilegeTypes.privilegeType AND
+          users.userID = userPrivileges.userID
+GO

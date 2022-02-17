@@ -1,0 +1,68 @@
+/* Deletes all user votes from the userVotes table (at the end of an event).
+   Keeps the totals in the voteOptions table. */
+/* input:  voteID. 
+   output: None
+*/
+CREATE PROC delUserVotes
+(
+  @voteID		numeric(10,0)
+)
+AS
+BEGIN
+  DECLARE @total int
+  DECLARE @optionID int
+  DECLARE @lastError int
+ 
+  DECLARE voteOptionsCursor CURSOR
+  FOR 
+  SELECT optionID 
+    FROM voteOptions
+    WHERE voteID = @voteID
+  FOR UPDATE 
+  SELECT @lastError = @@error
+  IF @lastError != 0
+  BEGIN
+    ROLLBACK TRAN
+    RETURN @lastError
+  END
+ 
+  OPEN voteOptionsCursor
+  FETCH voteOptionsCursor INTO @optionID
+  WHILE ( @@sqlstatus = 0 ) 
+  BEGIN
+    SELECT @total = count(*)
+      FROM userVotes
+      WHERE voteID = @voteID AND
+            optionID = @optionID
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    /* Set the total number of user votes */
+    UPDATE voteOptions
+      SET totalSelections = @total
+      WHERE CURRENT OF voteOptionsCursor
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+    FETCH voteOptionsCursor INTO @optionID
+  END
+  CLOSE voteOptionsCursor
+  
+  DELETE userVotes
+  WHERE voteID = @voteID
+  SELECT @lastError = @@error
+  IF @lastError != 0
+  BEGIN
+    ROLLBACK TRAN
+    RETURN @lastError
+  END
+
+END
+GO

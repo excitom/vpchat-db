@@ -1,0 +1,16 @@
+CREATE VIEW penaltiesWithNames
+AS
+  SELECT penaltyID AS Id,
+         users.nickName AS Name, users.registrationMode AS Mode,
+         description AS Penalty,
+         issuedOn,
+         u1.nickName AS issuer,
+         u1.registrationMode AS issuerMode,
+         forgiven,
+         expiresOn,
+         comment
+  FROM penalties, penaltyTypes, users, users u1
+  WHERE penalties.penaltyType = penaltyTypes.penaltyType AND
+        penalties.userID = users.userID AND
+        penalties.issuedBy = u1.userID
+GO

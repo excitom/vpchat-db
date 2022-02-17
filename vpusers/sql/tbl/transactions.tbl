@@ -1,0 +1,26 @@
+/*
+ * This table is used for an extra layer of security and integrity
+ * checking for payment transactions. When our system generates a 
+ * transaction the info it put in here. Later, when the transaction is
+ * completed at the payment gateway, results are sanity checked here.
+ * Things to check, for example:
+ * - duplicate transactions
+ * - altered amount
+ * - altered account ID
+ * - altered credit card ID
+ *
+ * The ccID/type can be NULL when the record is first created, but need to be
+ * filled in before the transaction can be marked completed.
+ */
+CREATE TABLE transactions
+(
+	invoice		longName			NOT NULL
+                        	constraint isPrimary primary key,
+	IP		varchar(20)			NOT NULL,
+	accountID	userIdentifier			NOT NULL,
+	amount		smallmoney			NOT NULL,
+	ccID		userIdentifier			NULL,
+	type		tinyint				NULL,
+	completed	bit
+)
+GO

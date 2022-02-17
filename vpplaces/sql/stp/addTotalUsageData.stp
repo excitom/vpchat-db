@@ -1,0 +1,60 @@
+/* add one record to the total usage record */
+/*
+   INPUT: total usage, room usage, corridor usage, Buddy List usage
+*/
+CREATE PROCEDURE addTotalUsageData
+(
+  @totalUsage int,
+  @roomUsage int,
+  @corrUsage int,
+  @BLUsage int
+)
+AS
+BEGIN
+  DECLARE @lastError int
+  DECLARE @diffFromGMT int
+  DECLARE @currentTime VpTime
+  DECLARE @localTime VpTime
+  DECLARE @deleteTime VpTime
+
+  BEGIN TRANSACTION addTotalUsageData
+    SELECT @diffFromGMT = gmt
+      FROM vpusers..getGMT
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK transaction addTotalUsageData
+      RETURN @lastError
+    END
+    
+    IF ( @diffFromGMT IS NULL )
+      SELECT @diffFromGMT = 0
+    SELECT @localTime = getdate()
+    SELECT @currentTime = dateadd( hour, (-1) * @diffFromGMT, @localTime )
+    SELECT @deleteTime = dateadd( day, (-1) * 180, @currentTime)
+    
+    DELETE totalUsage
+      WHERE time < @deleteTime
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK transaction addTotalUsageData
+      RETURN @lastError
+    END
+    
+    INSERT totalUsage
+      VALUES ( @currentTime, 
+               @totalUsage, @roomUsage,
+               @corrUsage, @BLUsage )
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK transaction addTotalUsageData
+      RETURN @lastError
+    END
+  COMMIT TRANSACTION addTotalUsageData
+END
+GO

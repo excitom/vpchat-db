@@ -1,0 +1,100 @@
+/* Clear from database all records for users that either
+   1) registered but did not sign on at all 
+   2) have not signed on for a very long time
+      (for these we only mark a delete date, not 
+       do a physical deletion)
+   3) had their account deleted and a certain amount of time has passed since then */
+/* input:  
+     number of days allowed with no sign on after registration
+     number of days a deleted account stays "frozen" before its entry is removed from the database
+   output: None */
+CREATE PROC cleanUsers
+(
+  @notEnteredDeleteAfterDays smallint,
+  @nonActiveDeleteAfterDays  smallint,
+  @deletionGracePeriodDays   smallint
+)
+AS
+BEGIN
+  DECLARE @freezeBorderTime VpTime
+  
+  DECLARE @unsignedBorderTime VpTime
+  DECLARE @nonactiveBorderTime VpTime
+  DECLARE @lastError int
+  DECLARE @diffFromGMT int
+  DECLARE @currentDate VpTime
+  
+  BEGIN TRAN cleanUsers
+    SELECT @diffFromGMT = gmt
+      FROM getGMT
+    IF @diffFromGMT IS NULL
+      SELECT @diffFromGMT = 0
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN cleanUsers
+      RETURN @lastError
+    END
+
+    SELECT @currentDate = dateadd( hour, (-1) * @diffFromGMT, getdate() )
+    
+    SELECT @unsignedBorderTime = dateadd( day, @notEnteredDeleteAfterDays * -1, @currentDate )
+    SELECT @nonactiveBorderTime = dateadd( day, @nonActiveDeleteAfterDays * -1, @currentDate )
+    SELECT @freezeBorderTime = dateadd( day, @deletionGracePeriodDays * -1, @currentDate )
+    
+    /* delete users that have been inactive 
+       for a very long time */
+    DELETE users
+      FROM users, registration
+      WHERE ( users.userID = registration.userID ) AND
+            ( ( lastSignOnDate IS NOT NULL ) AND
+              /* ( deleteDate IS NULL )         AND -- delete date is obsolete */ 
+              ( lastSignOnDate < @nonactiveBorderTime ) ) AND
+            ( users.userID NOT IN 
+                ( SELECT DISTINCT userID
+                    FROM userPrivileges  ) )
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN cleanUsers
+      RETURN @lastError
+    END
+    
+    /* delete users that were registered
+       but haven't entered the community at all */
+    DELETE users
+      FROM users, registration
+      WHERE ( users.userID = registration.userID ) AND
+            ( ( lastSignOnDate IS NULL ) AND
+              ( registrationDate < @unsignedBorderTime ) ) AND
+            ( users.userID NOT IN 
+                ( SELECT DISTINCT userID
+                    FROM userPrivileges  ) )
+        
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN cleanUsers
+      RETURN @lastError
+    END
+    
+    /* delete date is obsolete */
+    -- /* physically remove records for deleted users
+    --    for which the grace period is over */
+    -- DELETE users
+    --   FROM registration, users
+    --   WHERE ( deleteDate < @freezeBorderTime ) AND
+    --         ( registration.userID = users.userID )
+    -- 
+    -- SELECT @lastError = @@error
+    -- IF @lastError != 0
+    -- BEGIN
+    --   ROLLBACK TRAN cleanUsers
+    --   RETURN @lastError
+    -- END
+
+  COMMIT TRAN cleanUsers
+END
+GO

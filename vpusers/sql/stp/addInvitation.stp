@@ -1,0 +1,77 @@
+/*
+ * Add an email address to the table of invitations sent.
+ *
+ * Output: 0 = success
+ *         20000 = unknown accountID
+ *         20001 = email already has received an invitation from sender
+ *         20002 = email already has received an invitation from someone else
+ */
+CREATE PROC addInvitation ( 
+	@accountID	userIdentifier,		-- sender
+	@email		longName
+)
+AS
+BEGIN
+  DECLARE @lastError	int
+  DECLARE @diffFromGMT	int
+  DECLARE @inviteDate	VpTime
+  DECLARE @senderID     userIdentifier
+
+  BEGIN TRAN
+
+    IF NOT EXISTS ( SELECT * FROM userAccounts WHERE accountID = @accountID )
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20000
+    END
+
+    SELECT @senderID = referredByID
+      FROM invitations
+      WHERE email = @email
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN @lastError
+    END
+
+    IF @senderID IS NOT NULL
+    BEGIN
+      ROLLBACK TRAN
+      IF @senderID = @accountID
+      BEGIN
+        RETURN 20001
+      END
+      ELSE BEGIN
+        RETURN 20002
+      END
+    END
+
+    SELECT @diffFromGMT = gmt
+      FROM getGMT
+    IF @diffFromGMT IS NULL
+      SELECT @diffFromGMT = 0
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN @lastError
+    END
+
+    SELECT @inviteDate = dateadd( hour, (-1) * @diffFromGMT, getdate() )
+
+    INSERT invitations (email, referredByID, inviteDate, counter)
+      VALUES (@email, @accountID, @inviteDate, 1)
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN @lastError
+    END
+
+  COMMIT TRAN
+END
+GO

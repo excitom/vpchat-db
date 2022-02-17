@@ -1,0 +1,4 @@
+/* index place usage by time */
+CREATE INDEX placeUsageByTimeIdx
+ON placeUsage ( time )
+GO

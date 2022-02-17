@@ -1,0 +1,13 @@
+/* input:  auditorium id, new URL
+   output: NONE
+*/
+CREATE PROC updAudURL
+(
+  @audId  numeric(6,0),
+  @newURL longName
+)
+AS
+  UPDATE auditoriums
+    SET background = @newURL
+    WHERE auditoriumID = @audId
+GO

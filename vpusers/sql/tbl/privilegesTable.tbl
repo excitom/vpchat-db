@@ -1,0 +1,9 @@
+CREATE TABLE userPrivileges
+(
+	privilegeID	privID				IDENTITY
+                        constraint isPrimary primary key,
+	userID		userIdentifier			NOT NULL,
+	privilegeType	privType			NOT NULL,
+	expiresOn	VpTime				NULL
+)
+GO

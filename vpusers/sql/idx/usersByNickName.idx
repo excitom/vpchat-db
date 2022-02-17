@@ -1,0 +1,4 @@
+/* index users by NickName */
+create index usersByNickNameIdx
+on users ( nickName, registrationMode )
+GO

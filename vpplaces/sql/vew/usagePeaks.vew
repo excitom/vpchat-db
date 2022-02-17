@@ -1,0 +1,11 @@
+CREATE VIEW usagePeaksView
+AS
+  SELECT max(totalUsage)      AS peakPoint,
+         datepart( YY, time ) AS day,
+         datepart( mm, time ) AS month,
+         datepart( dd, time ) AS year
+  FROM totalUsage
+  GROUP BY datepart( YY, time ),
+           datepart( mm, time ),
+           datepart( dd, time )
+GO

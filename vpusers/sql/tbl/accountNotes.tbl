@@ -1,0 +1,14 @@
+/*
+ * Post-It notes for account records.
+ *
+ * The userID indicates who added the note.
+ */
+CREATE TABLE accountNotes
+(
+	accountID	userIdentifier			NOT NULL
+                        	constraint isPrimary primary key,
+	userID		userIdentifier			NOT NULL,
+	noteDate	VpTime				NOT NULL,
+	comment		longName			NULL
+)
+GO

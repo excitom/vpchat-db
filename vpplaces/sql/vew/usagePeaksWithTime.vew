@@ -1,0 +1,11 @@
+CREATE VIEW usagePeaksWithTimeView
+AS
+  SELECT dateadd( hour, gmt, time ) AS localTime,
+         time as timeGMT,
+         totalUsage
+  FROM totalUsage tu, usagePeaksView upv, vpusers..getGMT
+  WHERE ( tu.totalUsage = upv.peakPoint ) AND
+        ( datepart( YY, tu.time ) = upv.day ) AND
+        ( datepart( mm, tu.time ) = upv.month ) AND
+        ( datepart( dd, tu.time ) = upv.year )
+GO

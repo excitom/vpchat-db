@@ -1,0 +1,4 @@
+/* index subscriptions by comment field (usually, a transaction ID) */
+create index subscrsByCommentIdx
+on  subscriptions( type,comment )
+GO

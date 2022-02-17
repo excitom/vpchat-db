@@ -1,0 +1,983 @@
+/*
+ * Post the results of a game
+ *
+ * There are several related operations. The first 3 are done in all
+ * cases, the last 2 only if this is a ladder game.
+ * 1. Update the won/lost/tied  and rating columns in the players table.
+ * 2. Update players' rating.
+ * 3. Increment reward points.
+ * 4. Update the gameResults table with player names, scores, and time stamp.
+ * 5. If more than 1 player in the game and all players in the same ladder,
+ *    then update the ladderMembers table with ranking changes.
+ * 
+ * Loser rank change option (from the ladders table)
+ *    0 = "yahoo rules", i.e. loser always loses one rung
+ *    1 = "case's rules", i.e. loser doesn't lose a rung unless the 
+ *        winner is immediately below
+ *  
+ * Output: 0 = success, ladder updated
+ *         1 = success, but not a ladder game
+ *         2 = results already posted, no action taken
+ *         3 = unregistred player(s), e.g. a guest
+ *         1nn = bad input
+ *         20001 = game type not found
+ *
+ *	If this is a ladder game, then the input score parameters
+ *	return the updating rankings as output parameters.
+ *
+ *      And finaly, the ladder name is returned as an output parameter.
+ *
+ * Score format:
+ * -- 0 => 1=winner, 0=loser (e.g. chess, checkers, battleship)
+ * -- 1 => 1=winner, 0=loser, 2=win by gammon, 3=win by backgammon
+ *	(e.g. backgammon, acey deucy)
+ * -- 2 => score is an integer (e.g. yahtzee)
+ * -- 3 => score is an integer, team play (e.g. spades)
+ *
+ * Author: Tom Lang 10/2004
+ */
+IF EXISTS
+ (SELECT name FROM sysobjects WHERE name = 'postResultsCommon' AND type = 'P') 
+ DROP PROC postResultsCommon
+GO  
+CREATE PROC postResultsCommon ( 
+	@gameID		integer,
+	@gameTypeID	userIdentifier,
+	@ladderName	longName output,
+	@numPlayers	tinyint,
+        @maxPlayers     tinyint,
+        @scoreFmt       tinyint,
+        @mask	        tinyint,
+	@slot1		int,
+	@userID1	userIdentifier,
+	@player1	VPuserID,
+	@score1		int output,
+	@slot2		int = NULL,
+	@userID2	userIdentifier = NULL,
+	@player2	VPuserID = NULL,
+	@score2		int = NULL output,
+	@slot3		int = NULL,
+	@userID3	userIdentifier = NULL,
+	@player3	VPuserID = NULL,
+	@score3		int = NULL output,
+	@slot4		int = NULL,
+	@userID4	userIdentifier = NULL,
+	@player4	VPuserID = NULL,
+	@score4		int = NULL output,
+	@whenPlayed	VpTime = NULL
+)
+AS
+BEGIN
+  DECLARE @lastError	int
+  DECLARE @slot		int
+  DECLARE @score	int
+  DECLARE @winnerScore	int
+  DECLARE @loserScore	int
+  DECLARE @newStatus	int
+  DECLARE @ladderGame	bit
+  DECLARE @loserRankOpt	bit
+  DECLARE @notifyID	userIdentifier
+  DECLARE @userID	userIdentifier
+  DECLARE @resultID	userIdentifier
+  DECLARE @diffFromGMT	int
+  DECLARE @player	VPuserID
+  DECLARE @rank		int
+  DECLARE @streak	int
+  DECLARE @winnerRank	int
+  DECLARE @tmpRank   	int
+  DECLARE @loserRank	int
+  DECLARE @rating	int
+  DECLARE @winnerRating	int
+  DECLARE @loserRating	int
+  DECLARE @gamesPlayed	int
+  DECLARE @playerCount	tinyint
+  DECLARE @delta	double precision
+  DECLARE @outcome	double precision
+  DECLARE @mantissa	double precision
+  DECLARE @gain		int
+
+  SELECT @ladderName = ''		-- default
+-- select 'gameID', @gameID
+-- select 'gameTypeID', @gameTypeID
+-- select 'ladderName', @ladderName
+-- select 'numPlayers', @numPlayers
+-- select 'maxPlayers', @maxPlayers
+-- select 'scoreFmt', @scoreFmt
+-- select 'slot1', @slot1
+-- select 'userID1', @userID1
+-- select 'player1', @player1
+-- select 'score1', @score1
+-- select 'slot2', @slot2
+-- select 'userID2', @userID2
+-- select 'player2', @player2
+-- select 'score2', @score2
+
+  /* If date/time stamp not provided as input,
+   * set it to "now" GMT.
+   */
+  IF @whenPlayed IS NULL
+  BEGIN
+    SELECT @diffFromGMT = gmt
+      FROM vpusers..getGMT
+    IF @diffFromGMT IS NULL
+      SELECT @diffFromGMT = 0
+    SELECT @whenPlayed = dateadd( hour, (-1) * @diffFromGMT, getdate() )
+  END
+
+  /* Make an array for the input game results using a temporary table.
+   * Load the table from the input parameters, for easier manipulation.
+   */
+  CREATE TABLE #results ( slot int, score int, player varchar(30),
+	rank int, streak int, gameRank int, rating int, gamesPlayed int, userID int NULL )
+
+  SELECT @playerCount = 0
+  IF @player1 IS NOT NULL AND @userID1 IS NOT NULL
+  BEGIN
+    SELECT @playerCount = @playerCount + 1
+    INSERT INTO #results (slot, score, player, rank, streak, gameRank, rating, gamesPlayed, userID)
+	VALUES(@slot1, @score1, @player1, 0, 0, 0, 0, 0, @userID1)
+  END
+
+  IF @player2 IS NOT NULL AND @userID2 IS NOT NULL
+  BEGIN
+    SELECT @playerCount = @playerCount + 1
+    INSERT INTO #results (slot, score, player, rank, streak, gameRank, rating, gamesPlayed, userID)
+	VALUES(@slot2, @score2, @player2, 0, 0, 0, 0, 0, @userID2)
+  END
+  IF @player3 IS NOT NULL AND @userID3 IS NOT NULL
+  BEGIN
+    SELECT @playerCount = @playerCount + 1
+    INSERT INTO #results (slot, score, player, rank, streak, gameRank, rating, gamesPlayed, userID)
+	VALUES(@slot3, @score3, @player3, 0, 0, 0, 0, 0, @userID3)
+  END
+  IF @player4 IS NOT NULL AND @userID4 IS NOT NULL
+  BEGIN
+    SELECT @playerCount = @playerCount + 1
+    INSERT INTO #results (slot, score, player, rank, streak, gameRank, rating, gamesPlayed, userID)
+	VALUES(@slot4, @score4, @player4, 0, 0, 0, 0, 0, @userID4)
+  END
+  SELECT @lastError = @@error
+  IF @lastError != 0
+  BEGIN
+    DROP TABLE #results
+    RETURN @lastError
+  END
+
+  IF @numPlayers != @playerCount	-- reconfirm expected # of players
+  BEGIN
+    DROP TABLE #results
+    RETURN 100
+  END
+
+  SELECT @winnerScore = max(score) FROM #results
+  SELECT @loserScore  = min(score) FROM #results
+
+  /* Create another temporary table for eventual use in
+   * recalculating the ladder rankings. This must be done
+   * outside the transaction.
+   */
+  CREATE TABLE #tempRank (userID int, rank int, newRank float)
+
+  /*
+   * Phase 1
+   * - Start a transaction
+   * - Update player's overall won/lost stats
+   * - Determine if this is a ladder game (all
+   *   players in the same ladder)
+   */
+  BEGIN TRAN
+    SELECT @notifyID = NULL	-- no ladder found yet
+    SELECT @ladderGame = 1	-- default: assume ladder game
+    SELECT @slot = 1		-- start with 1st game slot
+    WHILE (@slot <= @maxPlayers)
+    BEGIN
+      SELECT @userID = NULL
+      SELECT @score = score, @userID = userID
+        FROM #results
+        WHERE slot = @slot
+
+      IF @userID IS NOT NULL
+      BEGIN
+
+        /* Get player's current rating and games played */
+        SELECT @rating = NULL
+        SELECT @rating = rating,
+               @gamesPlayed = won + lost + tied
+          FROM players WHERE userID = @userID
+                       AND gameTypeID = @gameTypeID
+
+        SELECT @lastError = @@error
+        IF @lastError != 0
+        BEGIN
+          ROLLBACK TRAN
+          DROP TABLE #results
+          DROP TABLE #tempRank
+          RETURN @lastError
+        END
+
+        /* Player is rated */
+        IF @rating IS NOT NULL
+        BEGIN
+          UPDATE #results SET rating = @rating, gamesPlayed = @gamesPlayed
+            WHERE userID = @userID
+          IF @winnerScore = @loserScore 
+          BEGIN
+            UPDATE players SET tied = tied + 1
+              WHERE userID = @userID
+              AND gameTypeID = @gameTypeID
+          END
+          ELSE BEGIN
+            IF @score = @winnerScore
+            BEGIN
+              UPDATE players SET won = won + 1
+                WHERE userID = @userID
+                AND gameTypeID = @gameTypeID
+            END
+            ELSE BEGIN
+	      UPDATE players SET lost = lost + 1
+	        WHERE userID = @userID
+                AND gameTypeID = @gameTypeID
+            END
+	  END
+	END
+
+        /* Player is not yet rated */
+	ELSE BEGIN
+	  UPDATE #results SET rating = 1500, gamesPlayed = 1
+	    WHERE userID = @userID
+	  IF @winnerScore = @loserScore 
+            BEGIN
+	    INSERT players (userID, gameTypeID, won, lost, tied, rating)
+		VALUES (@userID, @gameTypeID, 0, 0, 1, 0)
+	  END
+	  ELSE BEGIN
+	    IF @score = @winnerScore
+	    BEGIN
+	      INSERT players (userID, gameTypeID, won, lost, tied, rating)
+		VALUES (@userID, @gameTypeID, 1, 0, 0, 0)
+            END
+            ELSE BEGIN
+	      INSERT players (userID, gameTypeID, won, lost, tied, rating)
+		VALUES (@userID, @gameTypeID, 0, 1, 0, 0)
+            END
+          END
+        END
+
+        SELECT @lastError = @@error
+        IF @lastError != 0
+        BEGIN
+          ROLLBACK TRAN
+          DROP TABLE #results
+          DROP TABLE #tempRank
+          RETURN @lastError
+        END
+
+        /* See if the player is in a ladder for this game */
+
+        SELECT @rank = NULL
+        IF @notifyID IS NULL
+        BEGIN
+          SELECT @notifyID = m.notifyID,
+                 @rank = rank,
+	       @streak = streak,
+	       @loserRankOpt = loserRankOpt
+            FROM ladderMembers m, ladders l
+            WHERE userID = @userID
+            AND   gameTypeID = @gameTypeID
+            AND   m.notifyID = l.notifyID
+	END
+        ELSE BEGIN
+          SELECT @rank = rank,
+                   @streak = streak
+            FROM ladderMembers
+            WHERE userID = @userID
+	    AND   notifyID = @notifyID
+        END
+
+        SELECT @lastError = @@error
+        IF @lastError != 0
+        BEGIN
+          ROLLBACK TRAN
+          DROP TABLE #results
+          DROP TABLE #tempRank
+          RETURN @lastError
+        END
+
+        IF @rank IS NULL	-- player not in a ladder for this game
+        BEGIN
+          SELECT @ladderGame = 0
+        END
+        ELSE BEGIN
+          UPDATE #results
+	  SET rank = @rank,
+	      streak = @streak
+	  WHERE slot = @slot
+        END		-- player in a ladder
+      END		-- a player is in this slot
+
+      SELECT @slot = @slot + 1
+    END			-- loop through game results
+
+    /* Phase 2
+     * Update the players' rating
+     */
+    
+    SELECT @winnerRating = max(rating) FROM #results WHERE score = @winnerScore
+    SELECT @loserRating  = max(rating) FROM #results WHERE score = @loserScore
+    SELECT @slot = 1		-- start with 1st game slot
+    WHILE (@slot <= @maxPlayers)
+    BEGIN
+      SELECT @userID = NULL
+      SELECT @rating      = rating,
+             @score       = score,
+             @gamesPlayed = gamesPlayed,
+             @userID      = userID
+        FROM #results
+        WHERE slot = @slot
+
+      IF @userID IS NOT NULL		-- a player is in this slot
+      BEGIN
+        /*
+         * Provisional player (< 20 games) ?
+         */
+        IF @gamesPlayed <= 20
+        BEGIN
+          IF @score = @winnerScore AND @score = @loserScore
+          BEGIN
+            IF @rating = @winnerRating AND @rating = @loserRating
+            BEGIN
+              SELECT @gain = 0		-- tie score, tie rating
+            END
+            ELSE BEGIN
+              IF @rating < @winnerRating
+              BEGIN
+                SELECT @gain = 20	-- tie score, lower rated than opponent
+              END
+              ELSE BEGIN
+                SELECT @gain = -20	-- tie score, higher rated than opponent
+              END
+            END
+          END
+          ELSE BEGIN
+            IF @score = @winnerScore 
+            BEGIN
+              IF @rating = @loserRating
+              BEGIN
+                SELECT @gain = 40	-- won, tie rating
+              END
+              ELSE BEGIN
+                IF @rating > @loserRating
+                BEGIN
+                  SELECT @gain = 30	-- won, higher rated than opponent
+                END
+                ELSE BEGIN
+                  SELECT @gain = 50	-- won, lower rated than opponent
+                END
+              END
+            END
+            ELSE BEGIN
+              IF @rating = @winnerRating
+              BEGIN
+                SELECT @gain = -40	-- lost, tie rating
+              END
+              ELSE BEGIN
+                IF @rating > @winnerRating
+                BEGIN
+                  SELECT @gain = -50	-- lost, higher rated than opponent
+                END
+                ELSE BEGIN
+                  SELECT @gain = -30	-- lost, lower rated than opponent
+                END
+              END
+            END
+          END
+          SELECT @rating = @rating + @gain
+        END
+
+        /*
+         * More than 20 games played
+         */
+        BEGIN
+
+          /*
+           * Compute expected outcome
+           */
+          IF @score = @winnerScore
+            SELECT @delta = -1.0 * convert(float, (@rating - @loserRating))
+          ELSE
+            SELECT @delta = -1.0 * convert(float, (@rating - @winnerRating))
+          IF @delta != 0.0
+            SELECT @delta = @delta/400.0
+          SELECT @mantissa = 10.0
+          SELECT @delta = 1.0/(power(@mantissa, @delta) + 1.0)
+
+          /*
+           * Compute weight factor (K)
+           */
+          SELECT @gain = 16
+          IF @rating < 2399
+            SELECT @gain = 24
+          IF @rating < 2099
+            SELECT @gain = 32
+
+          /*
+           * Compute game result
+           */
+          IF @score = @winnerScore
+          BEGIN
+            IF @score = @loserScore
+              SELECT @outcome = 0.5	-- tie game
+            ELSE
+              SELECT @outcome = 1.0	-- player is the winner
+          END
+          ELSE
+            SELECT @outcome = 0.0	-- player is the loser
+
+          /*
+           * Compute new rating
+           */
+          SELECT @rating = @rating + convert(int, round(convert(float, @gain) * (@outcome - @delta),0))
+          IF @rating < 100
+            SELECT @rating = 100
+
+        END
+
+        /*
+         * Update rating in the database
+         */
+        UPDATE players
+          SET rating = @rating
+          WHERE userID = @userID
+          AND gameTypeID = @gameTypeID
+
+        SELECT @lastError = @@error
+        IF @lastError != 0
+        BEGIN
+          ROLLBACK TRAN
+          DROP TABLE #results
+          DROP TABLE #tempRank
+          RETURN @lastError
+        END
+      END
+      SELECT @slot = @slot + 1
+    END			-- loop through game results
+
+    /* Phase 3
+     * If this is a ladder game,
+     * -- Update the ladder won/lost stats
+     * -- Update the rankings
+     * -- Update the games-played history
+     */
+    IF @ladderGame = 1 AND @numPlayers > 1
+    BEGIN
+-- select 'LADDER GAME', @numPlayers
+      SELECT @slot = 1		-- start with 1st game slot
+      SELECT @resultID = NULL
+      WHILE (@slot <= @maxPlayers)
+      BEGIN
+        SELECT @userID = NULL
+        SELECT @score = score,
+		@userID = userID,
+		@streak = streak,
+		@player = player
+          FROM #results
+          WHERE slot = @slot
+
+        IF @userID IS NOT NULL		-- a player is in this slot
+        BEGIN
+
+          /* Post the game history for this player */
+
+          IF @slot = 1
+          BEGIN
+            IF @gameID IS NOT NULL 
+            AND @gameID > 0
+            AND EXISTS (SELECT * FROM gameResultsPri
+		WHERE gameID = @gameID)
+            BEGIN
+              UPDATE gameResultsPri
+                SET notifyID   = @notifyID,
+	            gameTypeID = @gameTypeID,
+	            whenPlayed = @whenPlayed
+	        WHERE gameID = @gameID
+
+              SELECT @resultID = resultID
+                FROM gameResultsPri
+                WHERE gameID = @gameID
+            END
+            ELSE BEGIN
+              INSERT gameResultsPri
+                (gameID, notifyID, gameTypeID, whenPlayed)
+                VALUES(@gameID, @notifyID, @gameTypeID, @whenPlayed)
+
+              SELECT @resultID = @@identity
+            END
+          END
+          IF EXISTS( SELECT * FROM gameResultsSec WHERE resultID = @resultID AND userID = @userID)
+          BEGIN
+            UPDATE gameResultsSec
+              SET slot = @slot,
+                  score = @score
+              WHERE resultID = @resultID
+              AND userID = @userID
+          END
+          ELSE BEGIN
+            INSERT gameResultsSec
+              (resultID, userID, slot, score)
+              VALUES(@resultID, @userID, @slot, @score)
+          END
+
+          SELECT @lastError = @@error
+          IF @lastError != 0
+          BEGIN
+            ROLLBACK TRAN
+            DROP TABLE #results
+            DROP TABLE #tempRank
+            RETURN @lastError
+          END
+
+	  /* Update players stats for this ladder */
+
+	  IF @winnerScore = @loserScore 
+          BEGIN
+	    UPDATE ladderMembers
+	      SET tied = tied + 1,
+		lastGame = @whenPlayed,
+		lastAged = @whenPlayed
+	      WHERE userID = @userID
+	      AND notifyID = @notifyID
+	  END
+	  ELSE BEGIN
+	    IF @score = @winnerScore
+	    BEGIN
+ 	      IF @streak < 0
+		SELECT @streak = 1
+	      ELSE
+		SELECT @streak = @streak + 1
+	      UPDATE ladderMembers
+		SET won = won + 1,
+		  streak = @streak,
+		  lastGame = @whenPlayed,
+		  lastAged = @whenPlayed
+	 	WHERE userID = @userID
+	        AND notifyID = @notifyID
+            END
+            ELSE BEGIN
+ 	      IF @streak >= 0
+		SELECT @streak = -1
+	      ELSE
+		SELECT @streak = @streak - 1
+	      UPDATE ladderMembers
+		SET lost = lost + 1,
+		  streak = @streak,
+		  lastGame = @whenPlayed,
+		  lastAged = @whenPlayed
+	 	WHERE userID = @userID
+	        AND notifyID = @notifyID
+            END
+	  END
+
+          SELECT @lastError = @@error
+          IF @lastError != 0
+          BEGIN
+            ROLLBACK TRAN
+            DROP TABLE #results
+            DROP TABLE #tempRank
+            RETURN @lastError
+          END
+	END
+        SELECT @slot = @slot + 1
+      END
+
+      /* If a player is unranked, calculate
+       * starting rank as the lowest rung in the ladder.
+       */
+
+      DECLARE @unrankedPlayers int
+      SELECT @unrankedPlayers = count(rank)
+        FROM #results
+        WHERE rank = 0
+
+      IF @unrankedPlayers > 0
+      BEGIN
+        UPDATE #results
+          SET rank = (SELECT max(rank) + 1
+		FROM ladderMembers
+		WHERE notifyID = @notifyID)
+          WHERE rank = 0
+      END
+
+      /* Should ranking be calculated?
+       * Don't bother if the higher ranked player won.
+       */
+
+      SELECT @winnerRank = min(rank)
+        FROM #results 
+        WHERE score = @winnerScore
+
+      SELECT @loserRank = min(rank)
+        FROM #results
+        WHERE score = @loserScore
+
+      /* Update rankings if the lower ranked player 
+       * won the game or if a player is currently unranked.
+       */
+
+      IF @loserRank < @winnerRank OR @unrankedPlayers > 0
+      BEGIN
+
+	/* By what percentage of the delta between the winners rank 
+	 * and the loser's rank should the rankings change?
+	 */
+        DECLARE @gainPct int
+        SELECT @gainPct = gainPercentage
+	  FROM ladders
+	  WHERE notifyID = @notifyID
+
+        SELECT @lastError = @@error
+        IF @lastError != 0
+        BEGIN
+          ROLLBACK TRAN
+          DROP TABLE #results
+          DROP TABLE #tempRank
+          RETURN @lastError
+        END
+
+  	SELECT @delta = convert(real, @gainPct) / 100
+  	SELECT @delta = (@winnerRank - @loserRank) * @delta
+	SELECT @gain  = convert(int, @delta)	-- round down
+
+	/* Get the current ranking of everyone in the ladder.
+         * We may need to adjust the rank of some or all of the
+         * non-participants to make room for the new ranks of
+         * the players in this game. */
+
+	INSERT #tempRank SELECT userID, rank, convert(real,rank)
+				FROM ladderMembers
+				WHERE notifyID = @notifyID
+
+        SELECT @lastError = @@error
+        IF @lastError != 0
+        BEGIN
+          ROLLBACK TRAN
+          DROP TABLE #results
+          DROP TABLE #tempRank
+          RETURN @lastError
+        END
+
+	/* Fractional numbers are used to insert a new rank
+	 * between existing ranks. */
+
+	DECLARE @newRank int
+
+	IF @numPlayers = 2
+	BEGIN
+	  UPDATE #results SET gameRank = 1 WHERE score = @winnerScore
+	  UPDATE #results SET gameRank = 2 WHERE score = @loserScore
+
+  	  SELECT @newRank = @loserRank + @gain
+	  UPDATE #tempRank
+	    SET newRank = convert(real,@newRank) - .2
+	      WHERE userID IN (SELECT userID FROM #results WHERE gameRank = 1)
+
+	  /* does loser always drop a rung ? */
+	  IF @loserRankOpt = 0
+	  BEGIN
+  	    SELECT @newRank = @loserRank + 1
+	  END
+
+	  /* loser drops a rung only if beaten by the player
+	   * immediately below
+	   */
+	  ELSE BEGIN
+  	    SELECT @newRank = @loserRank
+	  END
+	  UPDATE #tempRank
+	    SET newRank = convert(real,@newRank) - .1
+	      WHERE userID IN (SELECT userID FROM #results WHERE gameRank = 2)
+	END
+
+	/*
+	 * Team game (score fmt 3) or Yahtzee type (score fmt 2)
+         */
+	ELSE BEGIN
+ 	  IF @scoreFmt = 3
+          BEGIN
+	    UPDATE #results SET gameRank = 2 WHERE score = @winnerScore
+	    UPDATE #results SET gameRank = 1 WHERE rank = @winnerRank AND score = @winnerScore
+	    UPDATE #results SET gameRank = 4 WHERE score = @loserScore
+	    UPDATE #results SET gameRank = 3 WHERE rank = @loserRank AND score = @loserScore
+
+	    /* Winners move up based on the top ranked loser */
+
+    	    SELECT @tmpRank = min(rank)
+      	      FROM #results
+      	      WHERE gameRank < 3
+  	    SELECT @delta = convert(real, @gainPct) / 100
+  	    SELECT @delta = (@tmpRank - @loserRank) * @delta
+	    SELECT @gain  = convert(int, @delta)	-- round down
+  	    SELECT @newRank = @loserRank + @gain
+	    UPDATE #tempRank
+	      SET newRank = convert(real,@newRank) - .2
+	        WHERE userID IN (SELECT userID FROM #results
+			WHERE rank = @tmpRank AND gameRank < 3)
+
+    	    SELECT @tmpRank = max(rank)
+      	      FROM #results
+      	      WHERE gameRank < 3
+  	    SELECT @delta = convert(real, @gainPct) / 100
+  	    SELECT @delta = (@tmpRank - @loserRank) * @delta
+	    SELECT @gain  = convert(int, @delta)	-- round down
+  	    SELECT @newRank = @loserRank + @gain
+	    UPDATE #tempRank
+	      SET newRank = convert(real,@newRank) - .2
+	        WHERE userID IN (SELECT userID FROM #results
+			WHERE rank = @tmpRank AND gameRank < 3)
+
+	    /* does loser always drop a rung ? */
+	    IF @loserRankOpt = 0
+	    BEGIN
+  	      SELECT @gain = 1
+	    END
+
+	    /* loser drops a rung only if beaten by the player
+	     * immediately below
+	     */
+	    ELSE BEGIN
+  	      SELECT @gain = 0
+	    END
+    	    SELECT @tmpRank = min(rank)
+      	      FROM #results
+      	      WHERE gameRank > 2
+  	    SELECT @newRank = @tmpRank + @gain
+	    UPDATE #tempRank
+	      SET newRank = convert(real,@newRank) - .1
+	        WHERE userID IN (SELECT userID FROM #results
+			WHERE rank = @tmpRank AND gameRank > 2)
+
+    	    SELECT @tmpRank = max(rank)
+      	      FROM #results
+      	      WHERE gameRank > 2
+  	    SELECT @newRank = @tmpRank + @gain
+	    UPDATE #tempRank
+	      SET newRank = convert(real,@newRank) - .1
+	        WHERE userID IN (SELECT userID FROM #results
+			WHERE rank = @tmpRank AND gameRank > 2)
+	  END
+
+	  /*
+	   * Yahtzee format - 2,3, or 4 players. One winner and one or 
+	   * two losers.
+	   */
+	  ELSE BEGIN
+ 	    IF @scoreFmt != 2
+	    BEGIN
+              ROLLBACK TRAN
+              DROP TABLE #results
+              DROP TABLE #tempRank
+              RETURN 110
+	    END
+
+	    UPDATE #results SET gameRank = 2 
+	    UPDATE #results SET gameRank = 1 WHERE score = @winnerScore
+
+	    /* Winner moves up based on the top ranked loser */
+
+  	    SELECT @tmpRank = (@tmpRank - @loserRank) * @delta
+	    SELECT @gain  = convert(int, @tmpRank)	-- round down
+  	    SELECT @newRank = @loserRank + @gain
+	    UPDATE #tempRank
+	      SET newRank = convert(real,@newRank) - .1
+	        WHERE userID IN (SELECT userID FROM #results WHERE gameRank = 1)
+
+	    /* does loser always drop a rung ? */
+	    IF @loserRankOpt = 0
+	    BEGIN
+  	      SELECT @gain = 1
+	    END
+
+	    /* loser drops a rung only if beaten by the player immediately below */
+	    ELSE BEGIN
+  	      SELECT @gain = 0
+	    END
+	    UPDATE #tempRank
+	      SET newRank = convert(real,rank) + convert(real,@gain) + .2
+	      WHERE userID IN (SELECT userID FROM #results WHERE gameRank > 1)
+	  END
+	END
+
+	/* Loop through the temporary rankings (which will contain
+         * some fractional numbers) in ascending order and
+	 * update the ladder rankings with the integer order
+	 * of this sequence.
+	 */
+
+	DECLARE rankCursor CURSOR
+	  FOR SELECT userID, rank FROM #tempRank ORDER BY newRank ASC
+	
+	DECLARE @i int
+	SELECT @i = 1
+  	OPEN rankCursor
+  	FETCH rankCursor INTO @userID, @rank
+  	WHILE ( @@sqlstatus = 0 ) 
+	BEGIN
+	  /* Skip unranked players who did not participate in this game */
+	  IF @rank > 0 OR EXISTS(SELECT * FROM #results WHERE userID=@userID)
+	  BEGIN
+	    UPDATE ladderMembers
+	      SET rank = @i
+	      WHERE notifyID = @notifyID
+	      AND   userID   = @userID
+            SELECT @lastError = @@error
+            IF @lastError != 0
+            BEGIN
+              ROLLBACK TRAN
+              DROP TABLE #results
+              DROP TABLE #tempRank
+              RETURN @lastError
+            END
+	    SELECT @i = @i + 1
+	  END
+  	  FETCH rankCursor INTO @userID, @rank
+	END
+	CLOSE rankCursor
+      END
+    END
+
+    /* Phase 4
+     * - Removed any abandonedGame entry for this game, 
+     *   since the game was resumed and finished.
+     */
+    IF EXISTS (SELECT * FROM abandonedGames WHERE gameID = @gameID)
+    BEGIN
+      DELETE abandonedGames WHERE gameID = @gameID
+      -- SELECT @lastError = @@error
+      -- IF @lastError != 0
+      -- BEGIN
+        -- ROLLBACK TRAN
+        -- DROP TABLE #results
+        -- DROP TABLE #tempRank
+        -- RETURN @lastError
+      -- END
+    END
+
+    /* Phase 5
+     * Update tournament results, if applicable
+     */
+    IF @ladderGame = 1
+    BEGIN
+      DECLARE @tied bit
+      DECLARE @winnerID userIdentifier
+      DECLARE @winnerID2 userIdentifier		-- if team game
+      DECLARE @loserID userIdentifier
+      DECLARE @loserID2 userIdentifier		-- if team game
+      DECLARE @p1 VPuserID			-- player names
+      DECLARE @p2 VPuserID
+      DECLARE @t1 VPuserID			-- team mate names
+      DECLARE @t2 VPuserID
+
+      IF @winnerScore = @loserScore
+        SELECT @tied = 1
+      ELSE
+        SELECT @tied = 0
+
+      IF @scoreFmt = 3
+      BEGIN
+        SELECT @winnerID = userID FROM #results WHERE score = @winnerScore
+        SELECT @winnerID2 = userID FROM #results WHERE score = @winnerScore AND userID != @winnerID
+        SELECT @p1 = player FROM #results WHERE score = @winnerScore
+        SELECT @t1 = player FROM #results WHERE score = @winnerScore AND player != @p1
+        SELECT @loserID = userID FROM #results WHERE score = @loserScore
+        SELECT @loserID2 = userID FROM #results WHERE score = @loserScore AND userID != @loserID
+        SELECT @p2 = player FROM #results WHERE score = @loserScore
+        SELECT @t2 = player FROM #results WHERE score = @loserScore AND player != @p2
+
+-- select 'POST TOURNAMENT RESULTS', @winnerID, @p1, @loserID, @p2, @winnerID2, @t1, @loserID2, @t2
+        EXEC @lastError = postTournamentResults @notifyID, @mask, @tied,
+                          @winnerID, @p1, @loserID, @p2,
+			  @winnerID2, @t1, @loserID2, @t2
+      END
+      ELSE BEGIN
+        SELECT @winnerID = userID FROM #results WHERE score = @winnerScore
+        SELECT @p1 = player FROM #results WHERE score = @winnerScore
+        SELECT @loserID = userID FROM #results WHERE score = @loserScore
+        SELECT @p2 = player FROM #results WHERE score = @loserScore
+
+        EXEC @lastError = postTournamentResults @notifyID, @mask, @tied,
+                          @winnerID, @p1, @loserID, @p2
+      END
+
+      IF @@trancount = 0 OR @lastError != 0
+      BEGIN
+        IF @@trancount > 0
+          ROLLBACK TRAN
+        DROP TABLE #results
+        DROP TABLE #tempRank
+        RETURN @lastError
+      END
+    END		-- ladder game
+
+  COMMIT TRAN
+
+  /* Phase 6
+   * Update reward points for the player's account.
+   */
+
+  -- SELECT @slot = 1		-- start with 1st game slot
+  -- WHILE (@slot <= @maxPlayers)
+  -- BEGIN
+    -- SELECT @userID = NULL
+    -- SELECT @userID = userID 
+      -- FROM #results
+      -- WHERE slot = @slot
+      -- AND score = @winnerScore
+
+    -- IF @userID IS NOT NULL
+    -- BEGIN
+      -- EXEC vpusers..updateUserPoints @userID, 100
+    -- END
+    
+    -- SELECT @slot = @slot + 1
+  -- END
+
+  /* Phase 7
+   * At this point the work is done. Updated rankings and the ladder
+   * name are returned to the caller, but if there's a problem it's
+   * not worth abandoning all the work done up to now.
+   *
+   * The input score parameters are reused for output rank parameters.
+   */
+-- select 'LADDER GAME', @ladderGame, @numPlayers
+  IF @ladderGame = 1 AND @numPlayers > 1
+  BEGIN
+    SELECT @score1 = rank FROM ladderMembers
+      WHERE notifyID = @notifyID
+      AND   userID IN (SELECT userID FROM #results WHERE player = @player1)
+    SELECT @score2 = rank FROM ladderMembers
+      WHERE notifyID = @notifyID
+      AND   userID IN (SELECT userID FROM #results WHERE player = @player2)
+    IF @numPlayers > 2
+    BEGIN
+      SELECT @score3 = rank FROM ladderMembers
+        WHERE notifyID = @notifyID
+        AND   userID IN (SELECT userID FROM #results WHERE player = @player3)
+    END
+    IF @numPlayers > 3
+    BEGIN
+      SELECT @score4 = rank FROM ladderMembers
+        WHERE notifyID = @notifyID
+        AND   userID IN (SELECT userID FROM #results WHERE player = @player4)
+    END
+    SELECT @lastError = 0	-- indicate this was a ladder game
+
+    /* And finally, get the ladder name. */
+    SELECT @ladderName = ladderName FROM ladders WHERE notifyID = @notifyID
+  END
+  ELSE 
+    SELECT @lastError = 1	-- success but not a ladder game
+
+  DROP TABLE #tempRank
+  DROP TABLE #results
+  RETURN @lastError
+END
+GO

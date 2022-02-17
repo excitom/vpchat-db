@@ -1,0 +1,32 @@
+CREATE VIEW subscriberAccounts
+AS
+  SELECT userAccounts.accountID,
+	ownerID,
+	accountType,
+	accountStatus,
+	billingCycle,
+	nameLimit,
+	discount,
+	unitCost,
+	paymentStatus,
+	enrolledReferrer,
+	userAccounts.creationDate,
+	renewalDate,
+	lastUpdated,
+	referredByID,
+	referredBy,
+	type,
+--		0 = none (e.g. complimentary)
+--		1 = paypal (comment should contain subscriber ID)
+--		2 = credit card (ccID has details)
+        autoRenew,
+--		should always be TRUE unless customer has asked to cancel
+	comment,
+	email,
+	subscription,
+	referral
+
+    FROM userAccounts,subscriptions,accountBalance
+    WHERE userAccounts.accountID=subscriptions.accountID
+    AND userAccounts.accountID=accountBalance.accountID
+GO

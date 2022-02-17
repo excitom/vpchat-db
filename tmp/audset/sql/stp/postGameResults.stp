@@ -1,0 +1,145 @@
+/*
+ * Post the results of a game
+ *
+ * Front end interface using player names
+ *
+ * See postResultsCommon.stp for the actual function.
+ * 
+ * Author: Tom Lang 10/2004
+ */
+IF EXISTS
+ (SELECT name FROM sysobjects WHERE name = 'postGameResults' AND type = 'P') 
+ DROP PROC postGameResults
+GO  
+CREATE PROC postGameResults ( 
+	@gameID		userIdentifier,
+	@gameTypeID	userIdentifier,
+	@ladderName	longName output,
+	@numPlayers	tinyint,
+	@slot1		int,
+	@player1	VPuserID,
+	@score1		int output,
+	@slot2		int = NULL,
+	@player2	VPuserID = NULL,
+	@score2		int = NULL output,
+	@slot3		int = NULL,
+	@player3	VPuserID = NULL,
+	@score3		int = NULL output,
+	@slot4		int = NULL,
+	@player4	VPuserID = NULL,
+	@score4		int = NULL output,
+	@whenPlayed	VpTime = NULL
+)
+AS
+BEGIN
+  DECLARE @lastError	int
+  DECLARE @maxPlayers	tinyint
+  DECLARE @scoreFmt	tinyint
+  DECLARE @userID1	userIdentifier
+  DECLARE @userID2	userIdentifier
+  DECLARE @userID3	userIdentifier
+  DECLARE @userID4	userIdentifier
+
+  IF @gameID IS NOT NULL 
+  AND @gameID > 0
+  AND EXISTS (SELECT * FROM gameResultsPri
+		WHERE gameID = @gameID)
+  BEGIN
+    RETURN 2		-- results already posted
+  END
+
+  IF @numPlayers = 1
+  BEGIN
+    RETURN 1		-- ignore single player game (e.g. yahtzee with
+  END			-- no opponents)
+
+  /* Get the score format for this game type
+   * -- 0 => 1=winner, 0=loser (e.g. chess, checkers, battleship)
+   * -- 1 => 1=winner, 0=loser, 2=win by gammon, 3=win by backgammon
+   *	(e.g. backgammon, acey deucy)
+   * -- 2 => score is an integer (e.g. yahtzee)
+   * -- 3 => score is an integer, team play (e.g. spades)
+   */
+  SELECT @scoreFmt = NULL
+  SELECT @maxPlayers = maxPlayers,
+	 @scoreFmt = scoreFmt
+    FROM gameTypes
+    WHERE gameTypeID = @gameTypeID
+
+  SELECT @lastError = @@error
+  IF @lastError != 0
+  BEGIN
+    RETURN @lastError
+  END
+
+  IF @scoreFmt IS NULL	-- invalid game type
+  BEGIN
+    RETURN 20001
+  END
+
+  IF @scoreFmt = 2	-- Yahtzee: 1,2,3 or 4 players
+  BEGIN
+    IF @numPlayers > @maxPlayers
+    BEGIN
+      RETURN 100
+    END
+  END
+  ELSE BEGIN
+    IF @numPlayers != @maxPlayers	-- confirm expected # of players
+    BEGIN
+      RETURN 100
+    END
+  END
+  /* Note: Information about game slots may be input in any order. For
+   * example the @slot1 parameter may contain a 2, indicating it's 
+   * describing the player in slot 2 of the game.
+   */
+  IF @slot1 < 1 OR @slot1 > @maxPlayers
+    RETURN 101
+  IF (@slot2 IS NOT NULL AND (@slot2 <1 OR @slot2 > @maxPlayers))
+    RETURN 102
+  IF (@slot3 IS NOT NULL AND (@slot3 <1 OR @slot3 > @maxPlayers))
+    RETURN 103
+  IF (@slot4 IS NOT NULL AND (@slot4 <1 OR @slot4 > @maxPlayers))
+    RETURN 104
+
+  SELECT @userID1 = userID
+    FROM vpusers..users
+    WHERE nickName = @player1 AND registrationMode = 2
+
+  IF @player2 IS NOT NULL
+  BEGIN
+    SELECT @userID2 = userID
+      FROM vpusers..users
+      WHERE nickName = @player2 AND registrationMode = 2
+  END
+
+  IF @player3 IS NOT NULL
+  BEGIN
+    SELECT @userID3 = userID
+      FROM vpusers..users
+      WHERE nickName = @player3 AND registrationMode = 2
+  END
+
+  IF @player4 IS NOT NULL
+  BEGIN
+    SELECT @userID4 = userID
+      FROM vpusers..users
+      WHERE nickName = @player4 AND registrationMode = 2
+  END
+
+  SELECT @lastError = @@error
+  IF @lastError != 0
+  BEGIN
+    RETURN @lastError
+  END
+
+  DECLARE @mask tinyint
+  SELECT @mask = 0x02	-- allow tournament update only if 'in progress'
+
+  EXEC @lastError = postResultsCommon @gameID, @gameTypeID, @ladderName output, @numPlayers, @maxPlayers, @scoreFmt, @mask, @slot1, @userID1, @player1, @score1 output, @slot2, @userID2, @player2, @score2 output ,@slot3, @userID3, @player3, @score3 output, @slot4, @userID4, @player4, @score4 output
+
+-- select 'postGameResults', @ladderName, @score1, @score2, @score3, @score4
+  RETURN @lastError
+END
+GO

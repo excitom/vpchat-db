@@ -1,0 +1,4 @@
+CREATE INDEX activityLogByIp
+ON activityLog ( IP )
+ON userDetailsSeg
+GO

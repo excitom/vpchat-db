@@ -1,0 +1,70 @@
+/* check user penalties and privileges
+   for a user that is registered in an auxiliary DB
+         data is returned in format: 
+         0/1 (privilege/penalty), type of priv./pen.
+
+   NOTE: registration mode is saved as 3 (auxiliary) for those users
+*/
+CREATE PROC checkAuxUser ( @userToCheck VPuserID, @diffFromGMT int )
+AS
+BEGIN
+  /* some constants */
+  DECLARE @AUX_REG_MODE int
+  DECLARE @GUEST_REG_MODE int
+  DECLARE @LOCAL_REG_MODE int
+  SELECT @AUX_REG_MODE = 3
+  SELECT @GUEST_REG_MODE = 1
+  SELECT @LOCAL_REG_MODE = 2
+  
+  /* turn all user ID to lower case, to get case insensitive comparisons */
+  SELECT @userToCheck = lower(@userToCheck)
+  DECLARE @thisTime VpTime
+  DECLARE @lastError int
+  
+  DECLARE @userID userIdentifier
+  DECLARE @password VPPassword
+  
+  SELECT @thisTime = dateadd( hour, (-1) * @diffFromGMT, getdate() )
+  
+  BEGIN TRAN checkAuxUser
+    SELECT @userID = users.userID
+      FROM users
+      WHERE ( users.nickName = @userToCheck ) AND
+            ( users.registrationMode = @AUX_REG_MODE )
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN checkAuxUser
+      RETURN @lastError
+    END
+    
+    IF ( @userID IS NULL )
+      /* dummy, just to create an empty result set */
+      SELECT 1, penaltyType
+        FROM penalties
+        WHERE 1=2
+    ELSE
+    BEGIN
+      /* @regMode != @GUEST_REG_MODE - check for privileges and penalties */
+      SELECT 1, penaltyType /* 1 to indicate that this is a penalty */
+        FROM penalties
+        WHERE ( penalties.userID = @userID ) AND
+         ( expiresOn > @thisTime )      AND
+              ( forgiven = 0 )
+      UNION
+      SELECT 0, privilegeType /* 0 marks this as privilege */
+        FROM userPrivileges
+        WHERE ( userPrivileges.userID = @userID )
+      
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN checkAuxUser
+        RETURN @lastError
+      END
+    END /* IF @userID IS NOT NULL */
+  COMMIT TRAN checkAuxUser
+  
+END
+GO 

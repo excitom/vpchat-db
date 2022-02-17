@@ -1,0 +1,47 @@
+/* update a unique client record
+*/
+IF EXISTS(SELECT name FROM sysobjects WHERE name='updateUniqueClient' AND type='P')
+ DROP PROC updateUniqueClient
+GO
+CREATE PROC updateUniqueClient
+( 
+  @uniqueId	longName,
+  @blocked      smallint,
+  @guestStarted VpTime,
+  @clientTZ     smallint,
+  @takenSurvey  smallint=0
+)
+AS
+BEGIN
+  DECLARE @lastError int
+
+  BEGIN TRAN
+
+    IF NOT EXISTS (SELECT * FROM uniqueClients WHERE uniqueId = @uniqueId)
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20000
+    END
+
+    SELECT @guestStarted = dateadd( hour, @clientTZ * (-1), @guestStarted )
+    UPDATE uniqueClients 
+      SET blocked = @blocked,
+          guestStarted = @guestStarted,
+          takenSurvey = @takenSurvey
+      WHERE uniqueId = @uniqueId
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+  COMMIT TRAN
+END
+GO
+IF OBJECT_ID('dbo.updateUniqueClient') IS NOT NULL
+        PRINT '<<< CREATED PROCEDURE dbo.updateUniqueClient >>>'
+ELSE
+        PRINT '<<< FAILED CREATING PROCEDURE dbo.updateUniqueClient >>>'
+GO

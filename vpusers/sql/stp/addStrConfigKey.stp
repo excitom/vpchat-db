@@ -1,0 +1,15 @@
+/* add a new configuration key */
+CREATE PROC addStrConfigKey
+(
+  @keyName varchar(20),
+  @belongsTo serviceID,
+  @type smallInt,
+  @keyID smallInt,
+  @strValue longName
+)
+AS
+  INSERT configurationKeys 
+    ( keyName, belongsTo, type, keyID, strValue )
+    VALUES 
+    ( @keyName, @belongsTo, @type, @keyID, @strValue )
+GO

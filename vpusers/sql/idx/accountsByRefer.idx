@@ -1,0 +1,4 @@
+/* index user accounts by who referred them */
+create index accountsByReferIdx
+on userAccounts ( referredByID )
+GO

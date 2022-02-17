@@ -1,0 +1,4 @@
+/* index bank account information users by account number/bank */
+create index echecksByNumber
+on echecks ( IOC_DDA_acct_name, IOC_DDA_routing )
+GO

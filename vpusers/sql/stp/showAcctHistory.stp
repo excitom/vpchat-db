@@ -1,0 +1,98 @@
+/*
+ * Show account history records.
+ * input:  accountID
+ *         flag, 1 = ascending date/time, 0 = descending
+ *         from/to date/time range (default = all)
+ *         client time zone (output date/time is relative to this TZ)
+ *
+ * output: Return value - 0 - success 
+ *		 	  20000 - can't find account 
+ *		 	  20001 - invalid range
+ *
+ */
+CREATE PROC showAcctHistory ( 
+	@accountID 	userIdentifier,
+	@asc		bit = 1,
+	@clientTZ	int = 0,
+	@from		VpTime = NULL,
+	@to		VpTime = NULL
+)
+AS
+BEGIN
+  DECLARE @comment	longName
+  DECLARE @descr	longName
+  DECLARE @name		VPuserID
+  DECLARE @time		VpTime
+  DECLARE @reason	int
+  DECLARE @value	int
+  DECLARE @found	bit
+
+  SELECT @found = 0
+
+  IF @from IS NULL AND @to IS NULL
+  BEGIN
+
+    IF @asc = 1
+    BEGIN
+      DECLARE historyCursor CURSOR
+       FOR SELECT time, reason, value, comment
+           FROM accountHistory
+           WHERE accountID = @accountID
+           ORDER BY time ASC
+    END
+    ELSE BEGIN
+      DECLARE historyCursor CURSOR
+       FOR SELECT time, reason, value, comment
+           FROM accountHistory
+           WHERE accountID = @accountID
+           ORDER BY time DESC
+    END
+  END
+  ELSE BEGIN
+    IF @from IS NULL OR @to IS NULL
+    BEGIN
+      RETURN 20001
+    END
+
+    SELECT @from = dateadd( hour, (-1) * @clientTZ, @from )
+    SELECT @to   = dateadd( hour, (-1) * @clientTZ, @to   )
+
+    IF @asc = 1
+    BEGIN
+      DECLARE historyCursor CURSOR
+       FOR SELECT time, reason, value, comment
+           FROM accountHistory
+           WHERE accountID = @accountID
+	   AND   time >= @from
+	   AND   time <= @to
+           ORDER BY time ASC
+    END
+    ELSE BEGIN
+      DECLARE historyCursor CURSOR
+       FOR SELECT time, reason, value, comment
+           FROM accountHistory
+           WHERE accountID = @accountID
+	   AND   time >= @from
+	   AND   time <= @to
+           ORDER BY time DESC
+    END
+  END
+
+  OPEN historyCursor
+  FETCH historyCursor INTO @time, @reason, @value, @comment
+  WHILE ( @@sqlstatus = 0 )
+  BEGIN
+    SELECT @found = 1
+
+    SELECT dateadd( hour, @clientTZ, @time ), @reason, @value, @comment
+        
+    FETCH historyCursor INTO @time, @reason, @value, @comment
+  END
+
+  IF @found = 0
+    RETURN 20000
+  ELSE
+    RETURN 0
+    
+END
+GO

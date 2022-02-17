@@ -1,0 +1,6 @@
+CREATE VIEW hosts
+AS
+  SELECT userID
+  FROM userPrivileges
+  WHERE privilegeType = 273
+GO

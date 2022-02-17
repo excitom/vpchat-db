@@ -1,0 +1,38 @@
+/* Clear from database all active penalties, historical 
+   penalties and warnings records for all users, 
+   either registered or others                           */
+CREATE PROC clearPenalties
+AS
+BEGIN
+  DECLARE @lastError int
+  
+  BEGIN TRAN
+    DELETE penalties
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+    
+    DELETE history
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+    
+    DELETE warnings
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+  COMMIT TRAN
+END
+GO

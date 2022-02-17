@@ -1,0 +1,8 @@
+CREATE TABLE userVotes
+(
+	voteID		numeric(10,0)			NOT NULL,
+	optionID	integer				NOT NULL,
+	name		VPuserID			NULL,
+	time		smalldatetime			NOT NULL
+)
+GO

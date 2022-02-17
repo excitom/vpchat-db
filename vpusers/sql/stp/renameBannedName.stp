@@ -1,0 +1,81 @@
+/* rename a banned name */
+/* input:  old banned name, new banned name
+   output: return value - 
+           0 - success,
+           20001 - if old name is not in the list,
+           20002 - if new name is same as old name
+           20003 - if new name is already in the list
+           20004 - fixed banned name can't be deleted
+*/
+CREATE PROC renameBannedName ( @oldBannedName VPuserID, @newBannedName VPuserID )
+
+AS
+BEGIN
+  DECLARE @lastError int
+  DECLARE @oldName VPuserID
+  DECLARE @newName VPuserID
+  
+  /* fixed banned name can't be deleted */
+  IF ( @oldBannedName = "__" )
+    RETURN 20004
+  
+  /* turn all user ID to lower case, to get case insensitive comparisons */
+  SELECT @oldBannedName = lower(@oldBannedName)
+  SELECT @newBannedName = lower(@newBannedName)
+  IF ( @oldBannedName = @newBannedName )
+    RETURN 20002
+
+  BEGIN TRAN renameBannedName
+    /* try to find the old name in the list */
+    SELECT @oldName = nickName
+      FROM bannedNames
+      WHERE ( nickName = @oldBannedName )
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN renameBannedName
+      RETURN @lastError
+    END
+    
+    IF ( @oldName IS NULL )
+    BEGIN
+      /* name not in list */
+      ROLLBACK TRAN renameBannedName
+      RETURN 20001
+    END
+    
+    /* try to find the new name in the list */
+    SELECT @newName = nickName
+      FROM bannedNames
+      WHERE ( nickName = @newBannedName )
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN renameBannedName
+      RETURN @lastError
+    END
+    
+    IF ( @newName IS NOT NULL )
+    BEGIN
+      /* name not in list */
+      ROLLBACK TRAN renameBannedName
+      RETURN 20003
+    END
+    
+    /* do the renaming */
+    UPDATE bannedNames
+      SET nickName = @newBannedName
+      WHERE ( nickName = @oldBannedName )
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN renameBannedName
+      RETURN @lastError
+    END
+    
+  COMMIT TRAN renameBannedName
+END
+GO

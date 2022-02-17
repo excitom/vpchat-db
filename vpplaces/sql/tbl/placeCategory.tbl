@@ -1,0 +1,10 @@
+CREATE TABLE placeCategories
+(
+	category	categoryIdentifier	NOT NULL
+                        	CONSTRAINT placeCategoryRefCategories REFERENCES categories,
+	URL		UrlType			NOT NULL,
+                        	CONSTRAINT uniquePlaceCategory
+					UNIQUE( category, URL ),
+	domainFlag	bit	DEFAULT 1	NOT NULL
+)
+GO

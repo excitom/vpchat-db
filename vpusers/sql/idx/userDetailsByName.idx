@@ -1,0 +1,4 @@
+/* index userDetails by upper(firstName, lastName) */
+create index userDetailsByNameIdx
+on userDetails ( upperFirst, upperLast )
+GO

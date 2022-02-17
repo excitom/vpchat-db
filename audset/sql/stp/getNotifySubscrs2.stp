@@ -1,0 +1,66 @@
+/*
+ * Get subscribers to a notify list.
+ *
+ * Input: notifyID, tournament ID
+ *
+ * Output: 0 = success
+ *         20000 = list not found
+ *
+ */
+IF EXISTS
+ (SELECT name FROM sysobjects WHERE name = 'getNotifySubscrs2' AND type = 'P') 
+ DROP PROC getNotifySubscrs2
+GO  
+CREATE PROC getNotifySubscrs2 (
+	@notifyID	userIdentifier,
+	@tournID	userIdentifier
+)
+AS
+BEGIN
+  DECLARE @lastError	int
+
+  BEGIN TRAN
+  IF EXISTS (SELECT *
+              FROM notifyLists
+              WHERE notifyID = @notifyID)
+  BEGIN
+    IF @tournID IS NULL OR @tournID = 0
+    BEGIN
+      SELECT s.userID, u.nickName, s.notifyPref
+        FROM notifySubscrs s, vpusers..users u, notifyLists n
+        WHERE s.notifyID = @notifyID
+        AND s.userID=u.userID
+        AND s.notifyID=n.notifyID
+        AND u.registrationMode = 2
+        AND u.locked = 0
+        ORDER BY u.nickName ASC
+    END
+    ELSE BEGIN
+      SELECT t.userID, u.nickName, 0x07 AS notifyPref
+        FROM tournamentPlayers t, vpusers..users u
+        WHERE t.tournID = @tournID
+        AND t.userID=u.userID
+        AND u.registrationMode = 2
+      UNION
+      SELECT t.userID, u.nickName, 0x07 AS notifyPref
+        FROM teamMates t, vpusers..users u
+        WHERE t.tournID = @tournID
+        AND t.userID=u.userID
+        AND u.registrationMode = 2
+      ORDER BY u.nickName ASC
+    END
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+  END
+  ELSE BEGIN
+    ROLLBACK TRAN
+    RETURN 20000
+  END
+
+  COMMIT
+END
+GO

@@ -1,0 +1,104 @@
+/*
+ * Delete a game ladder
+ *
+ * Ladders are unique by description. For history-keeping purposes, a
+ * ladder is never destroyed. It can be marked deleted, but it remains
+ * in the system. A deleted ladder can be reactivated by adding it again.
+ *
+ * Ladder member entries are not deleted, since they contain won/lost 
+ * records.
+ *
+ * Input: NotifyID (which is the common key for notify list and ladder)
+ *
+ * Output: 0 = success
+ *         20000 = ID not found
+ */
+IF EXISTS
+ (SELECT name FROM sysobjects WHERE name = 'delLadder' AND type = 'P') 
+ DROP PROC delLadder
+GO  
+CREATE PROC delLadder ( 
+	@notifyID	userIdentifier,
+        @accountID	userIdentifier = NULL
+)
+AS
+BEGIN
+  DECLARE @lastError	int
+  DECLARE @deleted	bit
+
+  BEGIN TRAN
+
+    IF EXISTS (SELECT * FROM notifyLists WHERE notifyID = @notifyID)
+    BEGIN
+      UPDATE notifyLists 
+        SET deleted = 1, locked = 1
+        WHERE notifyID = @notifyID
+
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+
+      DELETE notifyAccessList WHERE notifyID = @notifyID
+
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+
+      DELETE notifySubscrs WHERE notifyID = @notifyID
+
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+
+      DELETE ladderNotes WHERE notifyID = @notifyID
+
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+
+      DELETE pendingListSubscrs WHERE notifyID = @notifyID
+
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+
+      DELETE ladderMembers WHERE notifyID = @notifyID
+
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+    END
+    ELSE BEGIN
+      ROLLBACK TRAN
+      RETURN 20000
+    END
+
+  COMMIT TRAN
+
+  IF @accountID IS NOT NULL
+  BEGIN
+    EXEC vpusers..addAcctHistory @accountID, 61, @notifyID
+  END
+
+END
+GO
+GRANT EXECUTE ON delLadder TO vpusr
+GO

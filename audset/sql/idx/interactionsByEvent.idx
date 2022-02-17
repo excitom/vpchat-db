@@ -1,0 +1,4 @@
+/* interactions by event and interaction type */
+CREATE INDEX interactionsByEventIdx
+ON eventInteractions ( eventID, interactionType, status, hostName )
+GO

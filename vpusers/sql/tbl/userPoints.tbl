@@ -1,0 +1,16 @@
+/*
+ * This table keeps track of reward points
+ *
+ */
+CREATE TABLE userPoints
+(
+	userID		userIdentifier	NOT NULL
+                        constraint isPrimary primary key,
+	points		int		NOT NULL
+)
+ON userDetailsSeg
+GO
+GRANT SELECT ON dbo.userPoints TO audset
+GO
+GRANT UPDATE ON dbo.userPoints TO audset
+GO

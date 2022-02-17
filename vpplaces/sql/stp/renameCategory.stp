@@ -1,0 +1,84 @@
+/* rename an existing category */
+/*
+  INPUT  : category id, new category description (name)
+  OUTPUT : return value - 0 if successful
+                          20001 if category does not exist
+                          20002 if category with the same name is 
+                                already defined for that parent category
+                          20003 if new description is same as old
+*/
+CREATE PROC renameCategory
+(
+  @categoryToChange categoryIdentifier,
+  @description varchar(30)
+)
+AS
+BEGIN
+  DECLARE @lastError int
+  DECLARE @thisCategory categoryIdentifier
+  DECLARE @parentCategory categoryIdentifier
+  DECLARE @categoryUsingName categoryIdentifier
+  DECLARE @oldDescription varchar(30)
+  
+  BEGIN TRAN renameCategory
+    /* check if the given parent category exists */
+    SELECT @thisCategory = category,
+           @parentCategory = parentCategeory,
+           @oldDescription = description
+      FROM categories
+      WHERE ( category = @categoryToChange )
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN renameCategory
+      RETURN @lastError
+    END
+    
+    IF ( @thisCategory IS NULL )
+    BEGIN
+      /* category to be changed does not exist */
+      ROLLBACK TRAN renameCategory
+      RETURN 20001
+    END
+    
+    IF ( @oldDescription = @description )
+    BEGIN
+      /* new category description is same as the old one */
+      ROLLBACK TRAN renameCategory
+      RETURN 20003
+    END
+    
+    SELECT @categoryUsingName = category
+      FROM categories
+      WHERE ( parentCategeory = @parentCategory ) AND
+            ( description = @description )
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN renameCategory
+      RETURN @lastError
+    END
+    
+    IF ( @categoryUsingName IS NOT NULL )
+    BEGIN
+      /* new category description is in use by another category */
+      ROLLBACK TRAN renameCategory
+      RETURN 20002
+    END
+    
+    UPDATE categories
+      SET description = @description
+      WHERE ( category = @categoryToChange )
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN renameCategory
+      RETURN @lastError
+    END
+    
+  COMMIT TRAN renameCategory
+END
+GO 

@@ -1,0 +1,10 @@
+CREATE TABLE uniqueClients
+(
+	uniqueId	longName				NOT NULL
+                        constraint isPrimary primary key,
+        blocked		bit		DEFAULT 0		NOT NULL,
+        visits		smallint	DEFAULT 0		NOT NULL,
+	guestStarted	VpTime					NOT NULL,
+	takenSurvey	tinyint		DEFAULT 0
+)
+GO

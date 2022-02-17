@@ -1,0 +1,51 @@
+/* update flags for a name in the banned names list */
+/* input:  nickName, is it banned, is it filtered
+   output: return value - 
+           0 - success,
+           20001 - if name is not in the list
+*/
+CREATE PROC updateBannedName ( @nickName VPuserID, @isBanned bit = 1, @isFiltered bit = 1 )
+
+AS
+BEGIN
+  DECLARE @lastError int
+  DECLARE @oldName VPuserID
+
+  /* turn all user ID to lower case, to get case insensitive comparisons */
+  SELECT @nickName = lower(@nickName)
+  BEGIN TRAN updateBannedName
+    /* try to find this name in the list */
+    SELECT @oldName = nickName
+      FROM bannedNames
+      WHERE ( nickName = @nickName )
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN updateBannedName
+      RETURN @lastError
+    END
+    
+    IF ( @oldName IS NULL )
+    BEGIN
+      /* name not in list */
+      ROLLBACK TRAN updateBannedName
+      RETURN 20001
+    END
+    
+    /* try to update it if it already exists */
+    UPDATE bannedNames
+      SET isBanned = @isBanned,
+          isFiltered = @isFiltered
+      WHERE ( nickName = @nickName )
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN updateBannedName
+      RETURN @lastError
+    END
+    
+  COMMIT TRAN updateBannedName
+END
+GO

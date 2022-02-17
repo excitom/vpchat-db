@@ -1,0 +1,7 @@
+CREATE TABLE stateTypes
+(
+	typeID		numeric(4,0)			IDENTITY
+                        constraint isPrimary primary key,
+	title  		varchar(16)			NOT NULL
+)
+GO

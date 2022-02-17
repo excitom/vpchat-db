@@ -1,0 +1,12 @@
+/* get details for one event */
+/* input:  event id
+   output: auditorium id, stage URL
+*/
+CREATE PROC getEventInfo ( @eventID numeric(10,0) )
+AS
+BEGIN
+  SELECT auditorium, stageBackground
+    FROM events
+    WHERE eventID = @eventID
+END
+GO

@@ -1,0 +1,43 @@
+/*
+ * Return a list of game ladders
+ *
+ */
+CREATE PROC getLadders (
+	@showDeleted	bit=0
+)
+AS
+BEGIN
+  IF @showDeleted = 1
+  BEGIN
+    SELECT n.notifyID, n.locked, l.ladderName, n.description, n.subheader, 
+	createdDate, closed,
+       (SELECT DISTINCT gameName
+		FROM gameTypes g WHERE g.gameTypeID=l.gameTypeID) AS gameName,
+       (SELECT DISTINCT COUNT(userID)
+		FROM ladderMembers l WHERE l.notifyID=n.notifyID
+		AND pending = 0) AS members,
+       (SELECT DISTINCT COUNT(userID)
+		FROM ladderMembers l WHERE l.notifyID=n.notifyID
+		AND pending = 1) AS pending
+     FROM notifyLists n, ladders l
+     WHERE n.notifyID = l.notifyID
+     ORDER BY l.ladderName ASC
+  END
+  ELSE BEGIN
+    SELECT n.notifyID, n.locked, l.ladderName, n.description, n.subheader, 
+	createdDate, closed,
+       (SELECT DISTINCT gameName
+		FROM gameTypes g WHERE g.gameTypeID=l.gameTypeID) AS gameName,
+       (SELECT DISTINCT COUNT(userID)
+		FROM ladderMembers l WHERE l.notifyID=n.notifyID
+		AND pending = 0) AS members,
+       (SELECT DISTINCT COUNT(userID)
+		FROM ladderMembers l WHERE l.notifyID=n.notifyID
+		AND pending = 1) AS pending
+     FROM notifyLists n, ladders l
+     WHERE n.notifyID = l.notifyID
+     AND n.deleted = 0
+     ORDER BY l.ladderName ASC
+  END
+END
+GO

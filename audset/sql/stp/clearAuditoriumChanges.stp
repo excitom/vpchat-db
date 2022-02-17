@@ -1,0 +1,10 @@
+/* delete all records from the auditorium changes table */
+/* input:  NONE
+   output: NONE
+*/
+CREATE PROC clearAuditoriumChanges
+AS
+BEGIN
+  DELETE FROM auditoriumChanges
+END
+GO

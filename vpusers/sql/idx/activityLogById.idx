@@ -1,0 +1,5 @@
+CREATE CLUSTERED INDEX activityLogById
+ON activityLog ( accountID )
+WITH ALLOW_DUP_ROW
+ON userDetailsSeg
+GO

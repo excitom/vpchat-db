@@ -1,0 +1,60 @@
+/*
+  check if all characters in given string match those in
+  the userNameCharacters configuration key
+
+  INPUT: * string to check
+         * (optional) key to check against - default: value of
+           the userNameCharacters configuration key
+  OUTPUT
+
+         : return value - 0 if all characters in the given string can be found
+                           in the key
+                         20001 - if a mismatch was found
+
+*/
+CREATE PROC checkCharactersMatch
+(
+  @string longName,
+  @key longName = ""
+)
+AS
+BEGIN
+
+
+  DECLARE @lastError int
+  DECLARE @loc int
+  DECLARE @length int
+  DECLARE @currentChar char(1)
+
+  IF ( @key = "" )
+  BEGIN
+    /* key not supplied - get key from database */
+    BEGIN TRAN checkCharactersMatch
+      SELECT @key = strValue
+        FROM configurationKeys
+        WHERE keyName = "userNameCharacters"
+
+      SELECT @lastError = @@error
+      IF ( @lastError != 0 )
+      BEGIN
+        ROLLBACK TRAN checkCharactersMatch
+        RETURN @lastError
+      END
+    COMMIT TRAN checkCharactersMatch
+
+    /* now compare the strings */
+    SELECT @loc = 1
+    SELECT @length = char_length( @string )
+    WHILE ( @loc <= @length )
+    BEGIN
+      SELECT @currentChar = substring( @string, @loc, 1 )
+      IF ( charindex( @currentChar, @key ) = 0 )
+      BEGIN
+        /* character not found in key */
+        RETURN 20001
+      END
+      SELECT @loc = @loc + 1
+    END
+  END
+END
+GO

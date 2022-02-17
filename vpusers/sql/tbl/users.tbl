@@ -1,0 +1,16 @@
+CREATE TABLE users
+(
+	userID			userIdentifier			IDENTITY
+                        	constraint isPrimary primary key,
+	nickName		VPuserID			NOT NULL,
+	registrationMode        VpRegMode			NOT NULL,
+	locked			bit,
+	restricted		bit,
+	penalties		smallInt			NOT NULL,
+	warnings		smallInt			NOT NULL,
+	ignores			smallInt			NOT NULL,
+		CONSTRAINT uniqueNickname UNIQUE ( nickName, registrationMode )
+)
+GO
+GRANT SELECT ON users TO vpplaces
+GO

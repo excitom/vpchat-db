@@ -1,0 +1,16 @@
+/*
+ * Notes about users, intended for use by the guides.
+ * Indexed by user, account, guide name, and date/time.
+ *
+ */
+CREATE TABLE userNotes
+(
+	noteID		userIdentifier			IDENTITY
+                        	constraint isPrimary primary key,
+	userID		userIdentifier			NOT NULL,
+	accountID	userIdentifier			NOT NULL,
+	reportingID	userIdentifier			NOT NULL,
+	incidentDate	VpTime				NOT NULL,
+	comment		longName			NULL
+)
+GO

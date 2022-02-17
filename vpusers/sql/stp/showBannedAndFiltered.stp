@@ -1,0 +1,13 @@
+/* display all names from the banned names table 
+   that are marked as words to filter */
+/* input:  NONE
+   output: list of all entries in the table */
+CREATE PROC showBannedAndFiltered
+AS
+BEGIN
+  SELECT nickName, isBanned, isFiltered
+    FROM bannedNames
+    WHERE ( nickName != "__" )
+    ORDER BY nickName
+END
+GO

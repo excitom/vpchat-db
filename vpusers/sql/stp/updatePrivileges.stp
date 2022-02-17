@@ -1,0 +1,192 @@
+/* --- show all privileges, sorted by user and privilege type --- */
+/* this is an interface for calling from an HTML GUI */
+/* it is therefor assumed that no privilege will be
+   included both in the privileges to add and the privileges
+   to delete lists. */
+/* 
+   INPUT : nick name of user, registration mode of user,
+           privileges to add - as string, comma-separated list
+           privileges to delete - string, comma-separated list
+   OUTPUT: Return Value - 0 - Success
+                          20001 - trying to add privilege for 
+                              non-registered user in 
+                              local registration mode
+ */
+CREATE PROC updatePrivileges
+( 
+  @nickName VPuserID,          /* name of user to update privileges for */
+  @regMode VpRegMode,          /* registration mode of user */
+  @privsToAdd varchar(255), /* comma-separated list of privilege to be added */
+  @privsToDel varchar(255)  /* comma-separated list of privilege to be deleted */
+)
+AS
+BEGIN
+  DECLARE @lastError int
+  DECLARE @retVal int
+  DECLARE @userID userIdentifier
+  DECLARE @description varchar(30)
+  DECLARE @commaPos integer
+  DECLARE @counter integer
+  DECLARE @auxAsLocalAllowed bit
+  DECLARE @auxDbAddress longName
+  
+  /* turn all user ID to lower case, to get case insensitive comparisons */
+  SELECT @nickName = lower(@nickName)
+  
+  CREATE TABLE #privsToAdd ( description varchar(30), counter integer )
+  CREATE TABLE #privsToDel ( description varchar(30) )
+  BEGIN TRAN
+  
+    /* first load the names of the privilege types 
+       into the temporary tables                   */
+  
+    /* find what privilege types to add */
+    /* parse list */
+    SELECT @counter = 0
+    WHILE ( ascii( rtrim(ltrim(@privsToAdd ))) > 32 ) BEGIN
+      SELECT @commaPos = patindex( "%,%", @privsToAdd )
+      IF @commaPos = 0 BEGIN
+        SELECT @description = rtrim(ltrim(@privsToAdd))
+        SELECT @privsToAdd = ""
+      END
+      ELSE BEGIN
+        SELECT @description = rtrim( ltrim( substring( @privsToAdd, 1, @commaPos-1 ) ) )
+        SELECT @privsToAdd = substring( @privsToAdd, @commaPos+1, char_length( @privsToAdd ) - @commaPos )
+      END
+      INSERT INTO #privsToAdd VALUES ( @description, @counter )
+      
+      SELECT @lastError = @@error
+      IF @lastError !=0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+      
+      SELECT @counter = @counter + 1
+    END /* of WHILE */
+  
+    /* find what privilege types to delete */
+    /* parse list */
+    WHILE ( ascii( rtrim(ltrim(@privsToDel ))) > 32 ) BEGIN
+      SELECT @commaPos = patindex( "%,%", @privsToDel )
+      IF @commaPos = 0 BEGIN
+        SELECT @description = rtrim(ltrim(@privsToDel))
+        SELECT @privsToDel = ""
+      END
+      ELSE BEGIN
+        SELECT @description = rtrim( ltrim( substring( @privsToDel, 1, @commaPos-1 ) ) )
+        SELECT @privsToDel = substring( @privsToDel, @commaPos+1, char_length( @privsToDel ) - @commaPos )
+      END
+      INSERT INTO #privsToDel VALUES ( @description )
+      
+      SELECT @lastError = @@error
+      IF @lastError !=0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+      
+    END /* of WHILE */
+    
+    SELECT @auxDbAddress = ""
+    SELECT @auxDbAddress = strValue
+      FROM configurationKeys
+      WHERE ( keyName = "auxDbAddress" )
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    IF @auxDbAddress = ""
+      SELECT @auxAsLocalAllowed = 0
+    ELSE
+      SELECT @auxAsLocalAllowed = 1
+    
+    /* find the given user's user ID,
+       adding him if necessary        */
+    EXEC @retVal =
+      updateUser @userID OUTPUT, @nickName, @regMode, @auxAsLocalAllowed
+    
+    SELECT @lastError = @@error
+    IF @lastError !=0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+    
+    IF @userID = 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20001
+    END
+      
+    IF ( @retVal NOT IN ( 20001, 0 ) )
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @retVal
+    END
+  
+    /* now eliminate privileges that are already
+       in or out, depending on the respective list */
+    DELETE FROM #privsToAdd
+      WHERE description IN
+        ( SELECT description
+            FROM userPrivileges,privilegeTypes
+            WHERE userID = @userID AND 
+                  userPrivileges.privilegeType = privilegeTypes.privilegeType )
+    
+    SELECT @lastError = @@error
+    IF @lastError !=0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+    
+    DELETE FROM #privsToDel
+      WHERE description NOT IN
+        ( SELECT description
+            FROM userPrivileges,privilegeTypes
+            WHERE userID = @userID AND 
+                  userPrivileges.privilegeType = privilegeTypes.privilegeType )
+    
+    SELECT @lastError = @@error
+    IF @lastError !=0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+    
+    /* delete privileges for the user */
+    DELETE FROM userPrivileges
+      WHERE userID = @userID AND
+            privilegeType IN 
+            ( SELECT privilegeType 
+                FROM #privsToDel,privilegeTypes
+                WHERE privilegeTypes.description = #privsToDel.description )
+    
+    SELECT @lastError = @@error
+    IF @lastError !=0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    /* add privileges for the user */
+    INSERT userPrivileges ( userID, privilegeType )
+      SELECT @userID, privilegeType
+        FROM #privsToAdd,privilegeTypes
+          WHERE privilegeTypes.description = #privsToAdd.description
+    
+    SELECT @lastError = @@error
+    IF @lastError !=0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+    
+  COMMIT TRAN
+END
+GO 

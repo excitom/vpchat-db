@@ -1,0 +1,66 @@
+/*
+ * Set user account holder information for a user account.
+ * If no record existed one will be created. Otherwise the existing
+ * record is updated.
+ *
+ * OUTPUT : return value - 0 if successful update
+ *                         1 if new record
+ */
+
+CREATE PROC updateUserInfo
+(
+  @accountID		userIdentifier,
+  @city			VARCHAR(50) = NULL,
+  @countrycode		CHAR(2) = NULL,
+  @name_first		VARCHAR(50) = NULL,
+  @name_last		VARCHAR(50) = NULL,
+  @postalcode		VARCHAR(20) = NULL,
+  @stateprov		VARCHAR(30) = NULL,
+  @street_line1		VARCHAR(50) = NULL,
+  @phone_number		VARCHAR(16) = NULL,
+  @DLnumber		VARCHAR(20) = NULL,
+  @DLstate    		VARCHAR(65) = NULL,
+  @DOB	    		VARCHAR(10) = NULL
+)
+AS
+BEGIN
+  DECLARE @lastError int
+  DECLARE @rc int
+
+  BEGIN TRAN 
+    IF NOT EXISTS (SELECT * FROM userInfo WHERE accountID = @accountID)
+    BEGIN
+      INSERT userInfo (accountID, 
+			city, countrycode, name_first, name_last,
+			postalcode, stateprov, phone_number,
+			street_line1, DLnumber, DLstate, DOB)
+     	 	    VALUES (@accountID, 
+			    @city, @countrycode, @name_first, @name_last,
+			    @postalcode, @stateprov, @phone_number,
+			    @street_line1, @DLnumber, @DLstate, @DOB)
+      SELECT @rc = 1
+    END
+    ELSE
+    BEGIN
+      UPDATE userInfo 
+	SET city = @city, countrycode = @countrycode,
+            name_first = @name_first, name_last = @name_last,
+	    postalcode = @postalcode, stateprov = @stateprov,
+            phone_number = @phone_number,
+	    street_line1 = @street_line1, 
+	    DLnumber = @DLnumber, DLstate = @DLstate, DOB = @DOB
+        WHERE accountID = @accountID
+      SELECT @rc = 0
+    END
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN @lastError
+    END
+    
+  COMMIT TRAN 
+  RETURN @rc
+END
+GO

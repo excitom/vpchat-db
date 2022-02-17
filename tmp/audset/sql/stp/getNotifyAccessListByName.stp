@@ -1,0 +1,34 @@
+/*
+ * Get access list entry an individual user
+ *
+ */
+CREATE PROC getNotifyAccessListByName (
+	@nickName	VPuserID
+)
+AS
+BEGIN
+  BEGIN TRAN
+    IF EXISTS
+      (SELECT * FROM vpusers..users
+         WHERE nickName = @nickName
+         AND registrationMode = 2)
+    BEGIN
+      SELECT a.notifyID, description, subheader, type, n.locked as listLocked,
+             a.locked, accountID, maxMsgs, msgInterval, msgCount, type
+          FROM notifyAccessList a, notifyLists n, vpusers..users u
+          WHERE nickName = @nickName
+          AND   registrationMode = 2
+          AND a.userID = u.userID
+          AND a.notifyID = n.notifyID
+          AND n.deleted = 0
+          AND accessPriv & 0x01 = 0x01
+    END
+    ELSE BEGIN
+      ROLLBACK TRAN
+      RETURN 20000
+    END
+
+  COMMIT TRAN
+  RETURN 0
+END
+GO

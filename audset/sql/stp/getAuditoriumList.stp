@@ -1,0 +1,11 @@
+/* get list of auditoriums, giving id, name, client, background  */
+/* input:  NONE
+   output: list of auditoriums, stating for each - 
+           id, name, client, background
+*/
+CREATE PROC getAuditoriumList
+AS
+  SELECT auditoriumID, name, client, background
+    FROM auditoriums
+    ORDER BY name
+GO

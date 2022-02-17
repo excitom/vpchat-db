@@ -1,0 +1,92 @@
+/*
+ * add a note for a user
+ */
+CREATE PROC addUserNote ( 
+	@nickName	VPuserID,
+	@byWho		VPuserID,
+	@comment	VARCHAR(255)
+)
+AS
+BEGIN
+  DECLARE @lastError	int
+  DECLARE @diffFromGMT	int
+  DECLARE @incidentDate	VpTime
+  DECLARE @userID	userIdentifier
+  DECLARE @accountID	userIdentifier
+  DECLARE @reportingID	userIdentifier
+
+  BEGIN TRAN
+    SELECT @diffFromGMT = gmt
+      FROM getGMT
+    IF @diffFromGMT IS NULL
+      SELECT @diffFromGMT = 0
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN @lastError
+    END
+
+    SELECT @incidentDate = dateadd( hour, (-1) * @diffFromGMT, getdate() )
+
+    SELECT @userID = userID
+      FROM users
+      WHERE nickName = @nickName
+      AND   registrationMode = 2
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN @lastError
+    END
+
+    IF @userID IS NULL
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20000
+    END
+
+    SELECT @accountID = accountID
+      FROM registration
+      WHERE userID = @userID
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN @lastError
+    END
+
+    SELECT @reportingID = userID
+      FROM users
+      WHERE nickName = @byWho
+      AND   registrationMode = 2
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN @lastError
+    END
+
+    IF @reportingID IS NULL
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20000
+    END
+    
+    INSERT INTO userNotes (userID, accountID, reportingID, incidentDate, comment)
+      VALUES (@userID, @accountID, @reportingID, @incidentDate, @comment)
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+  COMMIT TRAN
+END
+GO

@@ -1,0 +1,4 @@
+/* index registrered users by registrationDate */
+create index registrationByDateIdx
+on registration ( registrationDate )
+GO

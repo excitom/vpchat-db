@@ -1,0 +1,273 @@
+/* Find all places for a given place type
+ */
+/*
+  INPUT  : placeType (Cool = 0, Events = 1, All= 2),
+           category id,
+           start index (where to start in the returned list of places),
+           number of places (number of places to return)
+  OUTPUT : all details for the PTG directory
+  RETURNS - 20001 if the place type is not found in the place types table
+            0 otherwise.
+*/
+
+CREATE PROC getPlaces(
+  @placeType 	integer,
+  @categoryId   numeric(6,0) = NULL,
+  @startIndex   integer	     = 0,
+  @numPlaces    integer      = -1
+)
+AS
+BEGIN
+  DECLARE @lastError integer
+  DECLARE @exclShadow	bit
+  DECLARE @unifyRepl	bit
+  DECLARE @minPeople	integer
+  DECLARE @sortOrder	integer /* NumPeople = 0, Title = 1 */
+
+  /* Get the place type's details from the placeTypes table */
+  SELECT @minPeople = minPeople, @sortOrder = sortOrder, 
+         @exclShadow = excludeShadow, @unifyRepl = unifyReplicates
+    FROM placeTypes
+    WHERE type = @placeType
+  IF @@rowcount = 0
+    RETURN 20001
+
+  SELECT @lastError = @@error
+  IF @lastError != 0
+    RETURN @lastError
+
+  /* Create temporary tables for processing the data */
+  CREATE TABLE #tempTable (URL varchar(255), title varchar(255), 
+                           roomUsage integer, corrUsage integer, type integer,
+                           capacity integer, repCount integer, category numeric(6,0)  NULL)
+  CREATE TABLE #sortTable (URL varchar(255), title varchar(255), 
+                           roomUsage integer, corrUsage integer, type integer,
+			   capacity integer, repCount integer, category numeric(6,0) NULL)
+  SELECT @lastError = @@error
+  IF @lastError != 0
+    RETURN @lastError
+
+  IF @placeType = 0		/* Cool Places */
+  BEGIN
+   IF @categoryId = NULL
+   BEGIN 
+     /* Get all cool places which belong to a category */
+     INSERT #tempTable 
+      SELECT vpPlacesList.URL,vpPlacesList.title,roomUsage,corrUsage,
+             vpPlacesList.type,capacity,repCount,placeCategories.category 
+        FROM vpPlacesList, persistentPlaces, placeCategories 
+        WHERE vpPlacesList.URL NOT LIKE "vpbuddy://%" AND
+              serialNumber != -1 AND
+              persistentPlaces.type != 2049 AND
+              vpPlacesList.URL =  persistentPlaces.URL AND 
+              placeCategories.URL = persistentPlaces.URL
+
+     /* Add the cool places with no category specified */
+     INSERT #tempTable 
+      SELECT vpPlacesList.URL,vpPlacesList.title,roomUsage,corrUsage,
+             vpPlacesList.type,capacity,repCount, NULL
+        FROM vpPlacesList, persistentPlaces 
+        WHERE vpPlacesList.URL NOT LIKE "vpbuddy://%" AND
+              serialNumber != -1 AND
+              persistentPlaces.type != 2049 AND
+              vpPlacesList.URL =  persistentPlaces.URL AND 
+              vpPlacesList.URL NOT IN (SELECT URL FROM #tempTable)
+   END
+   ELSE      
+      /* Get only persistent places which belong to the category
+         if specified */
+     INSERT #tempTable 
+      SELECT vpPlacesList.URL,vpPlacesList.title,roomUsage,corrUsage,
+             vpPlacesList.type,capacity,repCount,placeCategories.category 
+        FROM vpPlacesList, persistentPlaces, placeCategories
+        WHERE vpPlacesList.URL NOT LIKE "vpbuddy://%" AND
+              serialNumber != -1 AND
+              persistentPlaces.type != 2049 AND
+              vpPlacesList.URL =  persistentPlaces.URL AND 
+              placeCategories.URL = persistentPlaces.URL AND
+              placeCategories.category = @categoryId 
+  END  
+  ELSE
+  IF @placeType = 1		/* Auditorium Places */
+  BEGIN
+    IF @categoryId = NULL 
+    BEGIN
+      /* Get all auditoriums which belong to a category */
+      INSERT #tempTable
+        SELECT vpPlacesList.URL,vpPlacesList.title,roomUsage,corrUsage,
+               vpPlacesList.type,capacity,repCount,placeCategories.category 
+          FROM vpPlacesList, persistentPlaces, placeCategories 
+          WHERE vpPlacesList.URL NOT LIKE "vpbuddy://%" AND
+              serialNumber != -1 AND
+              persistentPlaces.type = 2049 AND
+              vpPlacesList.URL =  persistentPlaces.URL AND 
+              placeCategories.URL = persistentPlaces.URL
+
+     /* Add the auditoriums with no category specified */
+     INSERT #tempTable 
+      SELECT vpPlacesList.URL,vpPlacesList.title,roomUsage,corrUsage,
+             vpPlacesList.type,capacity,repCount, NULL
+        FROM vpPlacesList, persistentPlaces 
+        WHERE vpPlacesList.URL NOT LIKE "vpbuddy://%" AND
+              serialNumber != -1 AND
+              persistentPlaces.type = 2049 AND
+              vpPlacesList.URL =  persistentPlaces.URL AND 
+              vpPlacesList.URL NOT IN (SELECT URL FROM #tempTable)
+    END
+    ELSE
+      /* Get only auditoriums which belong to the category
+         if specified:  */  
+      INSERT #tempTable
+        SELECT vpPlacesList.URL,vpPlacesList.title,roomUsage,corrUsage,
+               vpPlacesList.type,capacity,repCount,placeCategories.category 
+          FROM vpPlacesList, persistentPlaces, placeCategories
+          WHERE vpPlacesList.URL NOT LIKE "vpbuddy://%" AND
+              serialNumber != -1 AND
+              persistentPlaces.type = 2049 AND
+              vpPlacesList.URL =  persistentPlaces.URL AND 
+              placeCategories.URL = persistentPlaces.URL AND
+              placeCategories.category = @categoryId 
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+      RETURN @lastError
+    /* For auditoriums, capacity is the audience capacity, not the stage */
+    UPDATE #tempTable
+      SET capacity = rowSize * numberOfRows
+      FROM #tempTable, persistentPlaces
+      WHERE #tempTable.URL = persistentPlaces.URL
+  END  
+  ELSE
+
+  IF @placeType = 2		/* All Places */
+  BEGIN
+    IF @categoryId = NULL 
+    BEGIN
+      /* First, get the places which belong to a category  */
+      INSERT #tempTable
+        SELECT vpPlacesList.URL,title,roomUsage,corrUsage,type,capacity,repCount,category
+          FROM vpPlacesList, placeCategories
+          WHERE vpPlacesList.URL NOT LIKE "vpbuddy://%" AND
+                serialNumber != -1 AND
+                ((vpPlacesList.URL = placeCategories.URL) OR
+                 (vpPlacesList.URL LIKE (placeCategories.URL + "%") AND
+                  placeCategories.domainFlag = 1))
+
+      SELECT @lastError = @@error
+      IF @lastError != 0
+        RETURN @lastError
+
+      /* Next, get the places wich do not fit under any category */
+      INSERT #tempTable
+        SELECT vpPlacesList.URL,title,roomUsage,corrUsage,type,capacity,repCount,NULL
+          FROM vpPlacesList
+          WHERE URL NOT LIKE "vpbuddy://%" AND
+                serialNumber != -1 AND
+                URL NOT IN (SELECT URL FROM #tempTable)
+    END
+    ELSE
+    BEGIN
+     /* Get the places which belong to the given category  */
+     INSERT #tempTable
+        SELECT vpPlacesList.URL,title,roomUsage,corrUsage,type,capacity,repCount,category
+          FROM vpPlacesList, placeCategories
+          WHERE vpPlacesList.URL NOT LIKE "vpbuddy://%" AND
+                serialNumber != -1 AND
+                ((vpPlacesList.URL = placeCategories.URL) OR
+                 (vpPlacesList.URL LIKE (placeCategories.URL + "%") AND
+                  placeCategories.domainFlag = 1)) AND
+              placeCategories.category = @categoryId 
+    END
+  END
+
+  SELECT @lastError = @@error
+  IF @lastError != 0
+    RETURN @lastError
+
+  IF @exclShadow = 1
+  BEGIN
+    IF @unifyRepl = 1
+      INSERT #sortTable
+       SELECT DISTINCT URL, title, sum(roomUsage), sum(corrUsage), 
+             type, max(capacity), count(repCount), category
+        FROM #tempTable
+        WHERE URL NOT IN 
+          (SELECT #tempTable.URL 
+             FROM #tempTable, shadowPlaces
+             WHERE #tempTable.URL LIKE (shadowPlaces.URL + "%"))
+        GROUP BY URL
+        HAVING sum(roomUsage) + sum(corrUsage) >= @minPeople
+    ELSE
+      INSERT #sortTable
+       SELECT *
+        FROM #tempTable
+        WHERE (roomUsage + corrUsage)>= @minPeople AND
+              URL NOT IN 
+              (SELECT #tempTable.URL 
+                 FROM #tempTable, shadowPlaces
+                 WHERE #tempTable.URL LIKE (shadowPlaces.URL + "%"))
+  END
+  ELSE 		/* Do not exclude shadow places */
+  BEGIN
+    IF @unifyRepl = 1
+      INSERT #sortTable
+       SELECT DISTINCT URL, title, sum(roomUsage), sum(corrUsage), 
+             type, max(capacity), count(repCount), category
+        FROM #tempTable
+        GROUP BY URL
+        HAVING sum(roomUsage) + sum(corrUsage) >= @minPeople
+    ELSE
+      INSERT #sortTable
+       SELECT *
+        FROM #tempTable
+        WHERE (roomUsage + corrUsage)>= @minPeople 
+  END
+
+  /* Now sort the resulting table and return only the requested number of Places*/
+  IF (@sortOrder = 0)
+    DECLARE placesCursor CURSOR
+      FOR SELECT *
+          FROM #sortTable
+          ORDER BY  roomUsage DESC,corrUsage DESC
+  ELSE
+  IF @sortOrder = 1
+    DECLARE placesCursor CURSOR
+      FOR SELECT * 
+          FROM #sortTable
+          ORDER BY title
+
+    DECLARE @count integer
+    DECLARE @URL varchar(255)
+    DECLARE @title varchar(255)
+    DECLARE @room integer
+    DECLARE @corr integer
+    DECLARE @type integer
+    DECLARE @capacity integer
+    DECLARE @rep integer
+    DECLARE @category numeric(6,0)
+
+    OPEN placesCursor
+
+    /* Skip 'startindex' records */
+    SELECT @count = 0
+    WHILE ((@@sqlstatus = 0) AND (@startIndex > @count))
+    BEGIN
+         FETCH placesCursor INTO @URL, @title, @room, @corr, @type, @capacity, @rep, @category
+         SELECT @count = @count + 1
+    END
+ 
+    /* Get only the requested block of places...*/
+    IF ((@@sqlstatus = 0) AND (@numPlaces > 0)) 
+    BEGIN
+      SET CURSOR ROWS @numPlaces FOR placesCursor
+      FETCH placesCursor
+    END
+    ELSE 
+    IF @numPlaces = -1
+    /* Fetch all remaining records from cursor */
+    WHILE (@@sqlstatus = 0)
+      FETCH placesCursor
+
+    CLOSE placesCursor
+END
+GO 

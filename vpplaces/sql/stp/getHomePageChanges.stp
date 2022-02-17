@@ -1,0 +1,22 @@
+/*
+ * Dump the change records for the homePages table, and truncate
+ * the changes table.
+ *
+ * output: return value - 0 
+ */
+CREATE PROC getHomePageChanges
+AS
+BEGIN
+  BEGIN TRAN
+    SELECT time, userID, change, intVal, strVal
+      FROM homePageChanges
+      
+    DELETE homePageChanges
+   
+  COMMIT TRAN
+  RETURN 0
+
+END
+GO
+GRANT EXECUTE ON getHomePageChanges TO vpusr
+GO

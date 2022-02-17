@@ -1,0 +1,17 @@
+/*
+ * Game types 
+ *
+ */
+CREATE TABLE gameTypes
+(
+	gameTypeID	userIdentifier	
+                        	CONSTRAINT isPrimary PRIMARY KEY,
+	gameName	longName,
+	maxPlayers	tinyint,
+	scoreFmt	tinyint
+		-- 0 => 1=winner, 0=loser
+		-- 1 => 1=winner, 0=loser, 2=win by gammon, 3=win by backgammon
+		-- 2 => score is an integer
+		-- 3 => score is an integer, team play
+)
+GO

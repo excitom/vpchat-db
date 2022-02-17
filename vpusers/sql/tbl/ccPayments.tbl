@@ -1,0 +1,16 @@
+/*
+ * This table augments the information in the payments table, when
+ * there is a credit card transaction involved.
+ */
+CREATE TABLE ccPayments
+(
+	paymentID	userIdentifier			NOT NULL
+                        	constraint isPrimary primary key,
+	AVS_result	varchar(10)			NOT NULL,
+	shopperID	varchar(42)			NOT NULL,
+	orderID		varchar(10)			NOT NULL,
+	approvalCode	varchar(6)			NOT NULL,
+	pmtType		tinyint				NULL,
+	ccID		userIdentifier			NULL
+)
+GO

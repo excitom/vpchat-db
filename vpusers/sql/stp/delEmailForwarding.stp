@@ -1,0 +1,58 @@
+/*
+ * Remove email forwarding for a user name
+ *
+ * Input: user name
+ *
+ * Output: 0 = success
+ *         20000 = name not found
+ */
+CREATE PROC delEmailForwarding ( @nickName VPuserID )
+AS
+BEGIN
+  DECLARE @lastError integer
+  DECLARE @accountID userIdentifier
+
+  BEGIN TRAN
+
+    SELECT @accountID = accountID
+      FROM users, emailForwarding, registration
+      WHERE nickName = @nickName
+      AND registrationMode = 2
+      AND users.userID = emailForwarding.userID
+      AND users.userID = registration.userID
+
+    IF @accountID IS NULL
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20000
+    END
+
+    DELETE emailForwarding
+      WHERE userID IN
+        (SELECT userID
+           FROM users
+           WHERE nickName = @nickName
+           AND registrationMode = 2)
+
+    SELECT @lastError = @@error
+    IF @lastError != 0 
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    /*
+     * trigger a service change
+     */
+    INSERT emailForwardingChanges (accountID) VALUES (@accountID)
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN @lastError
+    END
+
+  COMMIT TRAN
+END
+GO

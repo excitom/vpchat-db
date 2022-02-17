@@ -1,0 +1,218 @@
+/*
+ * Add a user home page
+ *
+ * Potentially there is one record in the homePages table for each user, since
+ * everyone can have a free web page. However not everyone creates a home page so
+ * it would be inefficient to add records here each time a user name is created.
+ * This procedure is only called when a user explicitly asks to have a home page.
+ *
+ * Once a record is added for a user, it is not removed (immediately) when the
+ * home page is deleted. This is because the record contains cumulative bytes
+ * transferred and we don't want these to be lost. For example, someone might
+ * try to get around monthly bandwidth limits by deleting and re-adding the page.
+ * After the current month, deleted web page records may be cleaned out of the
+ * table.
+ *
+ * If you attempt to add a page a second time, nothing changes and you get a 
+ * '1' return code.
+ *
+ * If you attempt to add a page that was deleted, it comes back with previous
+ * values and a '2' return code.
+ *
+ * If you want to change things, use the updateHomePage procedure.
+ *
+ * output: return value - 0 if successful
+ *			  1 if already added
+ *			  2 if had been deleted
+ */
+CREATE PROC addHomePage
+(
+  @userID               userIdentifier,
+  @maxSpace		int,
+  @maxTransfer		int,
+  @URL                  UrlType,
+  @URL2                 UrlType = NULL
+)
+AS
+BEGIN
+  DECLARE @lastError int
+  DECLARE @diffFromGMT int
+  DECLARE @now VpTime
+  DECLARE @statsDate VpTime
+  DECLARE @prevStatsDate VpTime
+  DECLARE @alias UrlType
+  DECLARE @deleted bit
+  DECLARE @locked bit
+  DECLARE @megsTransferred int
+  DECLARE @bytesUsed int
+
+  BEGIN TRAN
+    SELECT @diffFromGMT = gmt
+    FROM vpusers..getGMT
+   
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    SELECT @now = dateadd( hour, (-1) * @diffFromGMT, getdate() )
+    SELECT @statsDate  = dateadd( month, 1, @now )
+
+    IF EXISTS (SELECT * FROM homePages WHERE userID = @userID)
+    BEGIN
+
+      /*
+       * if page was deleted, restore it.
+       * - don't reset the counters.
+       * - add a change record so the files will be restored.
+       */
+      SELECT @prevStatsDate = statsDate,
+                   @deleted = deleted,
+	   @megsTransferred = megsTransferred,
+	         @bytesUsed = bytesUsed
+        FROM homePages
+        WHERE userID = @userID
+   
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+
+      IF @deleted = 1
+      BEGIN
+
+        /*
+         * If the stats date is past, reset stats
+         */
+        IF @prevStatsDate < @now
+        BEGIN
+
+          /*
+           * Initialze lock based on existing counters and limits
+           */
+          IF @bytesUsed > (@maxSpace*1024*1024)
+          BEGIN
+            SELECT @locked = 1
+          END
+          ELSE BEGIN
+            SELECT @locked = 0
+          END
+
+          UPDATE homePages
+            SET  deleted = 0,
+                  locked = @locked,
+                maxSpace = @maxSpace,
+             maxTransfer = @maxTransfer,
+               statsDate = @statsDate,
+         megsTransferred = 0,
+        bytesTransferred = 0,
+               pageViews = 0,
+                 webHits = 0
+            WHERE userID = @userID
+        END
+
+        /*
+         * Stats date in the future, leave counters as-is
+         */
+        ELSE BEGIN
+
+          /*
+           * Initialze lock based on existing counters and limits
+           */
+          IF (@bytesUsed > (@maxSpace*1024*1024))
+          OR (@megsTransferred > @maxTransfer)
+          BEGIN
+            SELECT @locked = 1
+          END
+          ELSE BEGIN
+            SELECT @locked = 0
+          END
+
+          UPDATE homePages
+             SET deleted = 0,
+                  locked = @locked,
+                maxSpace = @maxSpace,
+             maxTransfer = @maxTransfer
+            WHERE userID = @userID
+        END
+   
+        SELECT @lastError = @@error
+        IF @lastError != 0
+        BEGIN
+          ROLLBACK TRAN
+          RETURN @lastError
+        END
+
+        /* add a change record */
+
+        SELECT @URL2 = URL2 FROM homePages WHERE userID = @userID
+        IF @URL2 IS NOT NULL
+        BEGIN
+          SELECT @URL = @URL2
+        END
+    
+        INSERT homePageChanges (time, userID, change, intVal, strVal)
+          VALUES (@now, @userID, 'D', 0, @URL)
+        
+        SELECT @lastError = @@error
+        IF @lastError != 0
+        BEGIN
+          ROLLBACK TRAN
+          RETURN @lastError
+        END
+
+        COMMIT TRAN
+        RETURN 2
+      END
+      /*
+       * attempt to re-add an undeleted page, ignore it
+       */
+      ELSE BEGIN
+        ROLLBACK TRAN
+        RETURN 1
+      END
+    END
+   
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+  
+    /*
+     * create a new home page record
+     */
+    INSERT homePages
+      ( userID,
+        statsDate,
+        maxSpace, maxTransfer,
+        megsTransferred, bytesTransferred,
+        URL, URL2, bytesUsed,
+        locked, deleted )
+      VALUES 
+      ( @userID, 
+        @statsDate,
+        @maxSpace, @maxTransfer,
+        0, 0,
+        @URL, @URL2, 
+        0, 0, 0 )
+   
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+  COMMIT TRAN
+  RETURN 0
+
+END
+GO
+GRANT EXECUTE ON addHomePage TO vpusr
+GO

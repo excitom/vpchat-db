@@ -1,0 +1,79 @@
+/* add a new category */
+/*
+  INPUT  : category description (name), parent category
+  OUTPUT : ID of new category
+           return value - 0 if successful
+                          20001 if parent category does not exist
+                          20002 if category with the same name is 
+                                already defined for that parent category
+*/
+CREATE PROC addCategory
+(
+  @description varchar(30),
+  @parentCategory categoryIdentifier = NULL
+)
+AS
+BEGIN
+  DECLARE @lastError int
+  DECLARE @category categoryIdentifier
+  DECLARE @oldCategory varchar(30)
+  
+  BEGIN TRAN addCategory
+    IF ( @parentCategory IS NOT NULL )
+    BEGIN
+      /* check if the given parent category exists */
+      SELECT @category = category
+        FROM categories
+        WHERE ( category = @parentCategory )
+      
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN addCategory
+        RETURN @lastError
+      END
+      
+      IF ( @category IS NULL )
+      BEGIN
+        ROLLBACK TRAN addCategory
+        RETURN 20001
+      END
+    END
+    
+    SELECT @oldCategory = category
+      FROM categories
+      WHERE ( parentCategeory = @parentCategory ) AND
+            ( description = @description )
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN addCategory
+      RETURN @lastError
+    END
+    
+    IF ( @oldCategory IS NOT NULL )
+    BEGIN
+      ROLLBACK TRAN addCategory
+      RETURN 20002
+    END
+    
+    INSERT categories ( parentCategeory, description, catOrder )
+      VALUES ( @parentCategory, @description, 0 )    
+    
+    SELECT @lastError = @@error
+
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN addCategory
+      RETURN @lastError
+    END
+    
+    SELECT category
+      FROM categories
+      WHERE ( parentCategeory = @parentCategory ) AND
+            ( description = @description )
+    
+  COMMIT TRAN addCategory
+END
+GO 

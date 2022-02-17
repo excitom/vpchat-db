@@ -1,0 +1,71 @@
+/*
+ * Show activity log for an account, searching by IP address
+ * input:  IP address
+ *         flag, 1 = ascending date/time, 0 = descending
+ *         client time zone (output date/time is relative to this TZ)
+ *         from/to date/time range 
+ *
+ *	If both from and to are null, show all.
+ *
+ * output: Return value - 0 - success 
+ *			  20001 - missing from or to date
+ *
+ */
+CREATE PROC showActivityLogByIp ( 
+	@IP		VARCHAR(20),
+	@asc		bit = 1,
+	@clientTZ	int = 0,
+	@from		VpTime = NULL,
+	@to		VpTime = NULL
+)
+AS
+BEGIN
+
+  IF @from IS NULL AND @to IS NULL
+  BEGIN
+
+    IF @asc = 1
+    BEGIN
+      SELECT accountID, dateadd(hour, @clientTZ, time) AS when, comment, who, IP
+         FROM activityLog
+         WHERE IP LIKE @IP
+         ORDER BY time ASC
+    END
+    ELSE BEGIN
+      SELECT accountID, dateadd(hour, @clientTZ, time) AS when, comment, who, IP
+         FROM activityLog
+         WHERE IP LIKE @IP
+         ORDER BY time DESC
+    END
+    RETURN 0
+  END
+
+  IF @from IS NULL OR @to IS NULL
+  BEGIN
+    RETURN 20001
+  END
+
+  SELECT @from = dateadd( hour, (-1) * @clientTZ, @from )
+  SELECT @to   = dateadd( hour, (-1) * @clientTZ, @to   )
+
+
+  IF @asc = 1
+  BEGIN
+     SELECT accountID, dateadd(hour, @clientTZ, time) AS when, comment, who, IP
+       FROM activityLog
+       WHERE IP LIKE @IP
+       AND   time >= @from
+       AND   time <= @to
+       ORDER BY time ASC
+  END
+  ELSE BEGIN
+     SELECT accountID, dateadd(hour, @clientTZ, time) AS when, comment, who, IP
+       FROM activityLog
+       WHERE IP LIKE @IP
+       AND   time >= @from
+       AND   time <= @to
+       ORDER BY time DESC
+  END
+
+END
+GO

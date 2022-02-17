@@ -1,0 +1,8 @@
+/* index home pages by statistics date  */
+CREATE INDEX homePagesByDateIdx
+ON homePages ( statsDate )
+GO
+/* index home pages by user name  */
+CREATE INDEX homePagesByNameIdx
+ON homePages ( URL )
+GO

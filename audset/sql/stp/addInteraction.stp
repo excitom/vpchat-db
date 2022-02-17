@@ -1,0 +1,78 @@
+/* add one user interaction for a specific event */
+/* input:  event id, interaction type, sender name, text, anonymous flag
+   output: error 20001 if interaction type blocked.
+*/
+CREATE PROC addInteraction
+(
+  @eventID		numeric(10,0),
+  @interactionType	numeric(2,0),
+  @sender		varchar(16),
+  @text                 varchar(255)
+)
+AS
+BEGIN
+  DECLARE @diffFromGMT int
+  DECLARE @currentDate VpTime
+  DECLARE @lastError int
+  DECLARE @idle int
+  DECLARE @blocked int
+
+  BEGIN TRAN addInteraction
+
+    /* Check if interaction type is blocked */
+    SELECT @blocked = interactBlocked
+      FROM interactionsAllowed
+      WHERE eventID = @eventID AND
+            interactionType = @interactionType
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN addInteraction
+      RETURN @lastError
+    END
+    IF @blocked = 1
+    BEGIN
+      ROLLBACK TRAN addInteraction
+      RETURN 20001
+    END
+
+
+    SELECT @diffFromGMT = gmt
+    FROM vpusers..getGMT
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN addInteraction
+      RAISERROR @lastError
+      RETURN @lastError
+    END
+    
+    SELECT @idle = statusID
+    FROM interactionStatus
+    WHERE name = "IDLE"
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN addInteraction
+      RAISERROR @lastError
+      RETURN @lastError
+    END
+ 
+    INSERT eventInteractions 
+      ( eventID, interactionType, time, senderName, text, status)
+    VALUES ( @eventID, @interactionType, 
+  	   dateadd( hour, (-1) * @diffFromGMT, getdate() ), 
+             @sender, @text, @idle )
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN addInteraction
+      RAISERROR @lastError
+      RETURN @lastError
+    END
+    
+  COMMIT TRAN addInteraction
+END
+GO

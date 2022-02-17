@@ -1,0 +1,193 @@
+/*
+ * When a player abandons a game, check to see if it is a ladder game.
+ * If so, make a note that this has happened.
+ *
+ * Output: 0 = success
+ */
+IF EXISTS
+  (SELECT name FROM sysobjects WHERE name = 'abandonGame' AND type = 'P')
+  DROP PROC abandonGame
+GO
+CREATE PROC abandonGame ( 
+	@gameID		integer,
+	@gameTypeID	userIdentifier,
+	@numPlayers	tinyint,
+	@quitter	int,
+	@slot1		int,
+	@player1	VPuserID,
+	@slot2		int = NULL,
+	@player2	VPuserID = NULL,
+	@slot3		int = NULL,
+	@player3	VPuserID = NULL,
+	@slot4		int = NULL,
+	@player4	VPuserID = NULL
+)
+AS
+BEGIN
+  DECLARE @lastError	int
+  DECLARE @slot		int
+  DECLARE @notifyID	userIdentifier
+  DECLARE @userID	userIdentifier
+  DECLARE @diffFromGMT	int
+  DECLARE @now		VpTime
+  DECLARE @player	VPuserID
+
+  IF @numPlayers < 2
+    RETURN
+
+  /* get date/time stamp */
+
+  SELECT @diffFromGMT = gmt
+    FROM vpusers..getGMT
+  IF @diffFromGMT IS NULL
+    SELECT @diffFromGMT = 0
+
+  SELECT @now = dateadd( hour, (-1) * @diffFromGMT, getdate() )
+
+  /* make an array using a temporary table */
+
+  CREATE TABLE #players ( slot tinyint, player varchar(30), userID int )
+
+  INSERT INTO #players (slot, player, userID)
+	VALUES(@slot1, @player1, 0)
+
+  INSERT INTO #players (slot, player, userID)
+	VALUES(@slot2, @player2, 0)
+  IF @numPlayers > 2
+  BEGIN
+    INSERT INTO #players (slot, player, userID)
+	VALUES(@slot3, @player3, 0)
+  END
+  IF @numPlayers > 3
+  BEGIN
+    INSERT INTO #players (slot, player, userID)
+	VALUES(@slot4, @player4, 0)
+  END
+  SELECT @lastError = @@error
+  IF @lastError != 0
+  BEGIN
+    DROP TABLE #players
+    RETURN @lastError
+  END
+
+  /* loop through the players */
+
+  SELECT @notifyID = NULL	-- no ladder found yet
+  SELECT @slot = 1		-- start with 1st game slot
+  WHILE (@slot <= @numPlayers)
+  BEGIN
+    SELECT @player = NULL
+    SELECT @player = player
+      FROM #players
+      WHERE slot = @slot
+
+    IF @player IS NOT NULL		-- a player is in this slot
+    BEGIN
+      /* verify the player exists */
+
+      SELECT @userID = NULL
+      SELECT @userID = userID
+        FROM vpusers..users
+        WHERE nickName = @player
+        AND   registrationMode = 2
+
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        DROP TABLE #players
+        RETURN @lastError
+      END
+
+      IF @userID IS NULL	-- non-registered player (e.g. a guest)
+      BEGIN
+        DROP TABLE #players
+        RETURN 0
+      END
+
+      ELSE BEGIN
+        UPDATE #players SET userID = @userID WHERE slot = @slot
+
+        SELECT @lastError = @@error
+        IF @lastError != 0
+        BEGIN
+          DROP TABLE #players
+          RETURN @lastError
+        END
+
+        /* see if the player is in a ladder for this game */
+
+      DECLARE @rank int
+      SELECT @rank = NULL
+      IF @notifyID IS NULL
+      BEGIN
+          SELECT @notifyID = m.notifyID, @rank = rank
+            FROM ladderMembers m, ladders l
+            WHERE userID = @userID
+            AND   gameTypeID = @gameTypeID
+            AND   m.notifyID = l.notifyID
+      END
+      ELSE BEGIN
+          SELECT @rank = rank
+            FROM ladderMembers
+            WHERE userID = @userID
+            AND   notifyID = @notifyID
+      END
+
+        SELECT @lastError = @@error
+        IF @lastError != 0
+        BEGIN
+          DROP TABLE #players
+          RETURN @lastError
+        END
+
+        IF @rank IS NULL	-- player not in a ladder for this game
+        BEGIN
+          DROP TABLE #players
+          RETURN 0
+        END
+
+      END		-- player is registered
+    END		-- a player is in this slot
+
+    SELECT @slot = @slot + 1
+  END			-- loop through game players
+
+  BEGIN TRAN
+
+    SELECT @slot = 1		-- start with 1st game slot
+    WHILE (@slot <= @numPlayers)
+    BEGIN
+      SELECT @player = NULL
+      SELECT @player = player,
+	     @userID = userID
+        FROM #players
+        WHERE slot = @slot
+
+      IF EXISTS (SELECT * FROM abandonedGames
+			WHERE gameID = @gameID
+			AND   userID = @userID)
+      BEGIN
+	UPDATE abandonedGames
+	  SET whenPlayed = @now, quitter = @quitter
+	  WHERE gameID = @gameID
+	  AND   userID = @userID
+      END
+      ELSE BEGIN
+	INSERT abandonedGames (gameID, notifyID, userID, gameTypeID, slot, quitter, whenPlayed)
+	  VALUES (@gameID, @notifyID, @userID, @gameTypeID, @slot, @quitter, @now)
+      END
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        DROP TABLE #players
+        RETURN @lastError
+      END
+      SELECT @slot = @slot + 1
+    END
+
+  COMMIT TRAN
+
+  DROP TABLE #players
+
+END
+GO

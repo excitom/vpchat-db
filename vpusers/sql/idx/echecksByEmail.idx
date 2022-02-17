@@ -1,0 +1,4 @@
+/* index bank account information users by email */
+create index echecksByEmail
+on echecks ( Ecom_billto_online_email )
+GO

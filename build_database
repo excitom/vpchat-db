@@ -1,0 +1,284 @@
+#!/bin/sh
+
+# This script does the building of the database:
+# 1. add types
+# 2. build tables
+# 3. add indexes
+# 4. add triggers
+# 5. add views
+# 6. add stored procedures
+# 7. do other miscelaneous tasks
+
+# read parameters
+if [ $# -lt 8 ]
+then
+   echo "usage: build_database <DbName> <ServicesRoot> <SybaseRoot> <DBAdminLogin> <DBAdminPasswd> <DatabaseUser> <DatabasePasswd> <DataServer> <KeepOldData (Create/Delete/Keep)>"
+   exit
+fi
+DbName=$1
+ServicesRoot=$2
+SybaseRoot=$3
+
+DBAdminLogin=$4
+DBAdminPasswd=$5
+if [ $DBAdminLogin = "-" ]
+then
+  noAdmin=1
+else
+  noAdmin=0
+fi
+
+VpDatabaseUser=$6
+VpDatabasePasswd=$7
+
+DataServer=$8
+
+KeepOldData=$9
+
+SrvRoot=$ServicesRoot/$DbName
+sqlDir=$SrvRoot/sql
+DefaultBackupDir=$SybaseRoot/db/backup
+
+SYBASE=$SybaseRoot
+export SYBASE
+
+sybBinDir=$SybaseRoot/bin
+
+if [ $KeepOldData != "C" ] && [ $KeepOldData != "R" ]
+then
+  # delete old triggers
+  echo Removing old triggers....
+  $sybBinDir/isql -U$VpDatabaseUser -P$VpDatabasePasswd -S$DataServer -i $ServicesRoot/dropTriggers.sql | \
+   grep -v "(" | \
+   $sybBinDir/isql -U$VpDatabaseUser -P$VpDatabasePasswd -S$DataServer
+  
+  # delete old stored procedures
+  echo Removing old stored procedures....
+  $sybBinDir/isql -U$VpDatabaseUser -P$VpDatabasePasswd -S$DataServer -i $ServicesRoot/dropProcedures.sql | \
+   grep -v "(" | \
+   $sybBinDir/isql -U$VpDatabaseUser -P$VpDatabasePasswd -S$DataServer
+  
+  # delete old views
+  echo Removing old views....
+  $sybBinDir/isql -U$VpDatabaseUser -P$VpDatabasePasswd -S$DataServer -i $ServicesRoot/dropViews.sql | \
+   grep -v "(" | \
+   $sybBinDir/isql -U$VpDatabaseUser -P$VpDatabasePasswd -S$DataServer
+  
+  # delete old database users - not including database owner
+  echo Removing old users....
+  $sybBinDir/isql -U$VpDatabaseUser -P$VpDatabasePasswd -S$DataServer -i $ServicesRoot/dropUsers.sql | \
+   grep -v "(" | \
+   $sybBinDir/isql -U$VpDatabaseUser -P$VpDatabasePasswd -S$DataServer
+fi
+
+if [ $KeepOldData = "K" ]
+then
+# add new types only
+# first, output names of existing types to file
+$sybBinDir/isql -U$VpDatabaseUser -P$VpDatabasePasswd -S$DataServer << ! > $sqlDir/existingTypes
+SELECT name
+FROM systypes
+WHERE usertype>100
+go
+!
+# add user types to databases
+typDir=$ServicesRoot/db/typ
+if [ ! -d $typDir ]
+then
+  typDir=$sqlDir/typ
+fi
+for scriptFile in $typDir/*.typ
+{
+  firstWord=`grep -i "sp_addtype" $scriptFile | cut -d" " -f1`
+  if [ $firstWord = "exec" ] || [ $firstWord = "EXEC" ] || \
+     [ $firstWord = "execute" ] || [ $firstWord = "EXECUTE" ]
+  then
+    typeToCreate=`grep -i "sp_addtype" $scriptFile | cut -d" " -f3`
+  else
+    typeToCreate=`grep -i "sp_addtype" $scriptFile | cut -d" " -f2`
+  fi
+  typeToCreate=`echo $typeToCreate | cut -d"," -f1`
+  grep $typeToCreate $sqlDir/existingTypes > /dev/null
+  typeExists=$?
+  if [ $typeExists -ge 1 ]
+  then
+    # type does not exist yet - create it
+    echo $sybBinDir/isql -U$VpDatabaseUser -P$VpDatabasePasswd -S$DataServer -i $scriptFile
+    $sybBinDir/isql -U$VpDatabaseUser -P$VpDatabasePasswd -S$DataServer -i $scriptFile
+  fi
+}
+rm -rf $sqlDir/existingTypes
+
+# add new tables only
+# first, output names of existing tables to file
+$sybBinDir/isql -U$VpDatabaseUser -P$VpDatabasePasswd -S$DataServer << ! > $sqlDir/existingTables
+SELECT name
+FROM sysobjects
+WHERE type="U"
+go
+!
+for scriptFile in `cat $sqlDir/tblOrder.txt`
+{
+  tableToCreate=`grep -i "create.*table" $sqlDir/$scriptFile | cut -d" " -f3`
+  grep $tableToCreate $sqlDir/existingTables > /dev/null
+  tblExists=$?
+  if [ $tblExists -ge 1 ]
+  then
+    # table does not exist yet - create it
+    echo $sybBinDir/isql -U$VpDatabaseUser -P$VpDatabasePasswd -S$DataServer -i $sqlDir/$scriptFile
+    $sybBinDir/isql -U$VpDatabaseUser -P$VpDatabasePasswd -S$DataServer -i $sqlDir/$scriptFile
+  fi
+}
+rm -rf $sqlDir/existingTables
+
+fi
+# of if [ $KeepOldData = "K" ]
+
+if [ $KeepOldData = "K" ]
+then
+  # run script to alter table structure list
+  if [ -f $sqlDir/alterTables ]
+  then
+    echo $sybBinDir/isql -U$VpDatabaseUser -P$VpDatabasePasswd -S$DataServer -i $sqlDir/alterTables
+    $sybBinDir/isql -U$VpDatabaseUser -P$VpDatabasePasswd -S$DataServer -i $sqlDir/alterTables
+  fi
+fi
+
+if [ $KeepOldData = "K" ]
+then
+  # try to add missing indexes
+  $sybBinDir/isql -U$VpDatabaseUser -P$VpDatabasePasswd -S$DataServer -i $ServicesRoot/findIndexes.sql | \
+    grep -v "(" > $sqlDir/indexesExisting
+  for scriptFile in $sqlDir/idx/*.idx
+  {
+    newIndexName=`grep -i "create index" $scriptFile | cut -d" " -f3`
+    newIndexTable=`grep -i "^on " $scriptFile | cut -d" " -f2`
+    grep "$newIndexTable *$newIndexName" $sqlDir/indexesExisting > /dev/null
+    indexExists=$?
+    if [ $indexExists -ge 1 ]
+    then
+      # index does not exist yet - create it
+      echo $sybBinDir/isql -U$VpDatabaseUser -P$VpDatabasePasswd -S$DataServer -i $scriptFile
+      $sybBinDir/isql -U$VpDatabaseUser -P$VpDatabasePasswd -S$DataServer -i $scriptFile
+    fi
+  }
+  # rm -f $sqlDir/indexesExisting
+fi
+
+if [ $KeepOldData != "K" ]
+then
+  if [ $KeepOldData = "C" ] || [ $KeepOldData = "R" ]
+  then
+    if [ $noAdmin -eq 0 ]
+    then
+      echo $sybBinDir/isql -U$DBAdminLogin -P$DBAdminPasswd -S$DataServer -i $SrvRoot/create_db_$DbName.sql
+      $sybBinDir/isql -U$DBAdminLogin -P$DBAdminPasswd -S$DataServer -i $SrvRoot/create_db_$DbName.sql
+    fi
+  fi
+  
+  if [ $KeepOldData != "R" ]
+  then  
+    # add user types to databases
+    typDir=$ServicesRoot/db/typ
+    if [ ! -d $typDir ]
+    then
+      typDir=$sqlDir/typ
+    fi
+    for scriptFile in $typDir/*.typ
+    {
+      echo $sybBinDir/isql -U$VpDatabaseUser -P$VpDatabasePasswd -S$DataServer -i $scriptFile
+      $sybBinDir/isql -U$VpDatabaseUser -P$VpDatabasePasswd -S$DataServer -i $scriptFile
+    }
+    
+    # add user tables to databases
+    for scriptFile in `cat $sqlDir/tblOrder.txt`
+    {
+      echo $sybBinDir/isql -U$VpDatabaseUser -P$VpDatabasePasswd -S$DataServer -i $sqlDir/$scriptFile
+      $sybBinDir/isql -U$VpDatabaseUser -P$VpDatabasePasswd -S$DataServer -i $sqlDir/$scriptFile
+    }
+    
+    # add indexes to user tables
+    for scriptFile in $sqlDir/idx/*.idx
+    {
+      echo $sybBinDir/isql -U$VpDatabaseUser -P$VpDatabasePasswd -S$DataServer -i $scriptFile
+      $sybBinDir/isql -U$VpDatabaseUser -P$VpDatabasePasswd -S$DataServer -i $scriptFile
+    }
+  fi
+fi
+
+
+if [ $KeepOldData != "R" ]
+then
+
+  # for script where order of execution matters
+  for scriptFile in `cat $sqlDir/scriptOrder.txt`
+  {
+    doScript=1
+    if [ $KeepOldData != "C" ] && [ $scriptFile = "stp/autobackup.stp" ]
+    then
+      doScript=0
+    else
+      doScript=1
+    fi
+    if [ $doScript -eq 1 ]
+    then
+      echo $sybBinDir/isql -U$VpDatabaseUser -P$VpDatabasePasswd -S$DataServer -i $sqlDir/$scriptFile
+      $sybBinDir/isql -U$VpDatabaseUser -P$VpDatabasePasswd -S$DataServer -i $sqlDir/$scriptFile
+    fi
+  }
+  
+  # do initial filling of tables, setting of 
+  # permissions, thresholds, etc.
+  for scriptFile in $sqlDir/sql/*.sql
+  {
+    doScript=1
+    if [ $KeepOldData != "K" ] && [ $scriptFile = $sqlDir/sql/incrementalFill.sql ]
+    then
+      doScript=0
+    else
+      if [ $KeepOldData = "K" ] && [ $scriptFile = $sqlDir/sql/fill.sql ]
+      then
+        doScript=0
+      else
+        if [ $noAdmin -eq 1 ] && [ $scriptFile = $sqlDir/sql/createThreshold.sql ]
+        then
+          doScript=0
+        else
+          doScript=1
+        fi
+      fi
+    fi
+    if [ $doScript -eq 1 ]
+    then
+      echo $sybBinDir/isql -U$VpDatabaseUser -P$VpDatabasePasswd -S$DataServer -i $scriptFile
+      $sybBinDir/isql -U$VpDatabaseUser -P$VpDatabasePasswd -S$DataServer -i $scriptFile
+    fi
+  }
+
+fi
+# of if [ $KeepOldData != "R" ]
+
+#scriptFile=$sqlDir/sql/setPermissions.sql
+if [ $KeepOldData = "R" ] && [ -f $scriptFile ]
+then
+  # run only the "setPermissions.sql" script
+  echo $sybBinDir/isql -U$VpDatabaseUser -P$VpDatabasePasswd -S$DataServer -i $scriptFile
+  $sybBinDir/isql -U$VpDatabaseUser -P$VpDatabasePasswd -S$DataServer -i $scriptFile
+fi
+# of if [ $KeepOldData = "R" ]
+    
+echo
+if  [ $noAdmin -eq 0 ] && ( [ $KeepOldData = "C" ] || [ $KeepOldData = "R" ] )
+then
+# do initial backup of database - to enable later dumps of transaction log
+# thus enabling log segment threshold to operate
+echo backing up database $DbName
+$sybBinDir/isql -U$VpDatabaseUser -P$VpDatabasePasswd -S$DataServer << !
+CHECKPOINT
+GO
+DUMP DATABASE $DbName TO "$DefaultBackupDir/$DbName.full.backupSet0"
+GO
+!
+fi
+echo
+echo

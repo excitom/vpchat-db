@@ -1,0 +1,112 @@
+/*
+ * Get game history for a specific game ladder
+ */
+IF EXISTS
+ (SELECT name FROM sysobjects WHERE name = 'getLadderHistory' AND type = 'P') 
+ DROP PROC getLadderHistory
+GO  
+CREATE PROC getLadderHistory (
+	@notifyID userIdentifier,
+	@days int = 1,
+	@showAbandonedGames bit = 1,
+	@direction bit = 1
+)
+AS
+BEGIN
+  DECLARE @diffFromGMT	int
+  DECLARE @fromDate	VpTime
+
+  SELECT @diffFromGMT = gmt
+    FROM vpusers..getGMT
+  IF @diffFromGMT IS NULL
+    SELECT @diffFromGMT = 0
+
+  IF @days = 0
+    SELECT @days = 365 * 2	-- two years ~= forever
+
+  SELECT @fromDate = dateadd( hour, (-1) * @diffFromGMT, getdate() )
+  SELECT @fromDate = dateadd( day, (-1) * @days, @fromDate )
+
+  IF @direction = 1
+  BEGIN
+    IF @showAbandonedGames = 0
+    BEGIN
+      IF NOT EXISTS (SELECT * FROM gameResultsPri
+			WHERE notifyID = @notifyID
+			AND   whenPlayed >= @fromDate)
+        RETURN 1
+
+      SELECT 'Y' AS completed, gameID, nickName, slot, score, whenPlayed, gameTypeID, p.resultID
+        FROM gameResultsPri p, gameResultsSec s, vpusers..users u
+        WHERE notifyID   = @notifyID
+        AND   p.resultID = s.resultID
+        AND   s.userID   = u.userID
+        AND   whenPlayed >= @fromDate
+        ORDER BY whenPlayed ASC
+    END
+    ELSE BEGIN
+      IF NOT EXISTS (SELECT * FROM gameResultsPri
+			WHERE notifyID = @notifyID
+			AND   whenPlayed >= @fromDate)
+      AND NOT EXISTS (SELECT * FROM abandonedGames
+			WHERE notifyID = @notifyID
+			AND   whenPlayed >= @fromDate)
+        RETURN 1
+
+      SELECT 'Y' AS completed, gameID, nickName, slot, score, whenPlayed, gameTypeID, p.resultID
+        FROM gameResultsPri p, gameResultsSec s, vpusers..users u
+        WHERE notifyID   = @notifyID
+        AND   p.resultID = s.resultID
+        AND   s.userID   = u.userID
+        AND   whenPlayed >= @fromDate
+      UNION
+      SELECT 'N' AS completed, gameID, nickName, slot, quitter AS score, whenPlayed, gameTypeID, 0 AS resultID
+        FROM abandonedGames g, vpusers..users u
+        WHERE notifyID = @notifyID
+        AND   g.userID = u.userID
+        AND   whenPlayed >= @fromDate
+        ORDER BY whenPlayed ASC
+    END
+  END
+  ELSE BEGIN		-- descending order
+    IF @showAbandonedGames = 0
+    BEGIN
+      IF NOT EXISTS (SELECT * FROM gameResultsPri
+			WHERE notifyID = @notifyID
+			AND   whenPlayed >= @fromDate)
+        RETURN 1
+
+      SELECT 'Y' AS completed, gameID, nickName, slot, score, whenPlayed, gameTypeID, p.resultID
+        FROM gameResultsPri p, gameResultsSec s, vpusers..users u
+        WHERE notifyID   = @notifyID
+        AND   p.resultID = s.resultID
+        AND   s.userID   = u.userID
+        AND   whenPlayed >= @fromDate
+        ORDER BY whenPlayed DESC
+    END
+    ELSE BEGIN
+      IF NOT EXISTS (SELECT * FROM gameResultsPri
+			WHERE notifyID = @notifyID
+			AND   whenPlayed >= @fromDate)
+      AND NOT EXISTS (SELECT * FROM abandonedGames
+			WHERE notifyID = @notifyID
+			AND   whenPlayed >= @fromDate)
+        RETURN 1
+
+      SELECT 'Y' AS completed, gameID, nickName, slot, score, whenPlayed, gameTypeID, p.resultID
+        FROM gameResultsPri p, gameResultsSec s, vpusers..users u
+        WHERE notifyID   = @notifyID
+        AND   p.resultID = s.resultID
+        AND   s.userID   = u.userID
+        AND   whenPlayed >= @fromDate
+      UNION
+      SELECT 'N' AS completed, gameID, nickName, slot, quitter AS score, whenPlayed, gameTypeID, 0 AS resultID
+        FROM abandonedGames g, vpusers..users u
+        WHERE notifyID = @notifyID
+        AND   g.userID = u.userID
+        AND   whenPlayed >= @fromDate
+        ORDER BY whenPlayed DESC
+    END
+  END
+END
+GO

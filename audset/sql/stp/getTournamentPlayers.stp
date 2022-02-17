@@ -1,0 +1,61 @@
+/*
+ * List the players registered for a tournament
+ */
+IF EXISTS
+ (SELECT name FROM sysobjects WHERE name = 'getTournamentPlayers' AND type = 'P') 
+ DROP PROC getTournamentPlayers
+GO  
+CREATE PROC getTournamentPlayers (
+  @tournID	userIdentifier
+)
+AS
+BEGIN
+DECLARE @scoreFmt int
+
+  IF NOT EXISTS (SELECT * FROM tournaments WHERE tournID = @tournID)
+  BEGIN
+    RETURN 20000
+  END
+
+  SELECT @scoreFmt = scoreFmt
+    FROM gameTypes g, tournaments t, ladders l
+    WHERE tournID = @tournID
+    AND   t.notifyID = l.notifyID
+    AND   l.gameTypeID = g.gameTypeID
+
+  /* team game */
+  IF @scoreFmt = 3
+  BEGIN
+    SELECT p.userID, nickName, initialRating, seed, 1 AS teamGame, 1 AS pri, 1 AS confirmed
+      FROM tournamentPlayers p, vpusers..users u, brackets b
+      WHERE p.tournID = @tournID
+      AND p.tournID = b.tournID
+      AND p.userID = u.userID
+      AND b.player = p.userID
+      AND round = 1
+      AND td = 0
+    UNION
+    SELECT p.userID, nickName, initialRating, seed, 1 AS teamGame, 0 AS pri, confirmed
+      FROM teamMates p, vpusers..users u, brackets b
+      WHERE p.tournID = @tournID
+      AND p.tournID = b.tournID
+      AND p.userID = u.userID
+      AND p.priUserID = b.player
+      AND round = 1
+    ORDER BY seed ASC, pri DESC
+  END
+
+  /* non-team game */
+  ELSE BEGIN
+    SELECT p.userID, nickName, initialRating, seed, 0 AS teamGame
+      FROM tournamentPlayers p, vpusers..users u, brackets b
+      WHERE p.tournID = @tournID
+      AND p.tournID = b.tournID
+      AND p.userID = u.userID
+      AND b.player = p.userID
+      AND round = 1
+      AND td = 0
+      ORDER BY seed ASC
+  END
+END
+GO

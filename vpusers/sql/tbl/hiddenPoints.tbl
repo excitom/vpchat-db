@@ -1,0 +1,13 @@
+/*
+ * This table keeps user names whose reward points should be hidden
+ * from lists of top user points earners. (For example, vpmanager may 
+ * have a ton of points for administrative purposes, but we don't want
+ * to show this user at the top of the list.)
+ */
+CREATE TABLE hiddenPoints
+(
+	userID		userIdentifier	NOT NULL
+                        constraint isPrimary primary key
+)
+ON userDetailsSeg
+GO

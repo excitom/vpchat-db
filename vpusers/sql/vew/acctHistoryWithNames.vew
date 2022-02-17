@@ -1,0 +1,15 @@
+CREATE VIEW acctHistoryWithNames
+AS
+  SELECT accountID,
+         time,
+         reason,
+         value,
+         users.nickName AS name,
+         comment,
+         u1.nickName AS who,
+         IP
+  FROM accountHistory, users, users u1
+  WHERE reason = 99
+  AND   accountHistory.value = users.userID
+  AND   accountHistory.whoID = u1.userID
+GO

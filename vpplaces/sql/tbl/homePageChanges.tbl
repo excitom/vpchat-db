@@ -1,0 +1,11 @@
+CREATE TABLE homePageChanges
+(
+	time	VpTime		NOT NULL,
+	userID	userIdentifier	NOT NULL,
+	change	char(1)		NOT NULL,
+	intVal	int		NULL,
+	strVal	longName	NULL
+)
+GO
+GRANT SELECT on homePageChanges TO vpusr
+GO

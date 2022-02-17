@@ -1,0 +1,9 @@
+CREATE TABLE interactionsAllowed
+(
+	eventID		numeric(10,0)			NOT NULL,
+	interactionType	numeric(2,0)			NOT NULL,
+	name		varchar(16)			NOT NULL,
+	interactBlocked	bit		DEFAULT 0	NOT NULL,
+		PRIMARY KEY ( eventID, interactionType )
+)
+GO

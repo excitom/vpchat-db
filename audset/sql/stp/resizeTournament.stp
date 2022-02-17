@@ -1,0 +1,120 @@
+/*
+ * Change the number of players in a tournament.
+ *
+ * Input: Tournament ID, new size
+ *
+ * Output: 0 = success
+ *         20000 = no such tournament
+ *         20001 = can't resize now
+ *         20002 = can't make smaller than number of registered players
+ *         20005 = too many players
+ *         20006 = players not a power of 2
+ *
+ * Tom Lang 1/2005
+ */
+IF EXISTS(SELECT name FROM sysobjects WHERE name='resizeTournament' AND type='P')
+ DROP PROC resizeTournament
+GO
+CREATE PROC resizeTournament (
+  @tournID	userIdentifier,
+  @players	integer
+)
+AS
+BEGIN
+  DECLARE @lastError	integer
+  DECLARE @type		tinyint
+  DECLARE @status	tinyint
+  DECLARE @curPlayers	smallint
+  DECLARE @registered	smallint
+
+  IF @players < 2 OR @players > 256 
+    RETURN 20005
+
+  IF @type = 2 AND (@players < 4 OR @players > 32)
+    RETURN 20005	-- special restriction
+  /* 
+   * confirm that players is a power of 2
+   */
+  IF (((((@players * 2) - 1) ^ -1) | (@players - 1)) ^ -1) & @players != @players
+    RETURN 20006
+
+  BEGIN TRAN
+    SELECT @type = type, @status = status, @curPlayers = players
+      FROM tournaments WHERE tournID = @tournID
+
+    IF @@rowcount = 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20000
+    END
+
+    IF @curPlayers = @players
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 0
+    END
+
+    IF @status != 0x01 AND @status != 0x10
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20001
+    END
+
+    SELECT @registered = COUNT(userID)
+      FROM tournamentPlayers
+      WHERE @tournID = tournID
+      AND td = 0
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    IF @registered > @players
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20002
+    END
+
+    UPDATE tournaments SET players = @players
+      WHERE tournID = @tournID
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    DELETE brackets WHERE tournID = @tournID
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+  COMMIT TRAN
+
+  /* Rebuild the brackets */
+
+  EXEC @lastError = buildBrackets @tournID, @type, @players
+  IF @lastError != 0
+  BEGIN
+    RETURN @lastError
+  END
+
+  /* update the default seedings for the first round bracket */
+
+  EXEC @lastError = updateSeeds @tournID
+
+  IF @lastError != 0
+  BEGIN
+    RETURN @lastError
+  END
+  
+END
+GO

@@ -1,0 +1,34 @@
+/* get update notifications for latest 
+   editing changes done on auditoriums */
+/* input:  NONE
+   output: list of auditorium changes, stating -
+   auditorium id, field id
+*/
+CREATE PROC getAuditoriumsUpdates
+AS
+BEGIN
+  DECLARE @lastError int
+  BEGIN TRAN
+    SELECT auditoriumID, fieldID
+      FROM auditoriumChanges
+      ORDER BY auditoriumID
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+    
+    DELETE FROM auditoriumChanges
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+    
+  COMMIT TRAN
+END
+GO

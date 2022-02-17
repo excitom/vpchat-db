@@ -1,0 +1,126 @@
+#!/bin/sh
+
+# This script does the actual running of backup scripts
+
+ServicesRoot=/excite/u/vplaces/VPCOM/VPDB/vpdb.2.1.4.1-all
+
+# get parameters from $ServicesRoot/backupData.txt
+backupPlan=`grep backupPlan $ServicesRoot/backupData.txt | cut -d" " -f2`
+backupInterval=`grep backupInterval $ServicesRoot/backupData.txt | cut -d" " -f2`
+fullBackupDay=`grep fullBackupDay $ServicesRoot/backupData.txt | cut -d" " -f2`
+backupTime=`grep backupTime $ServicesRoot/backupData.txt | cut -d" " -f2`
+
+# go into an infinite loop, 
+# wake up when the time is right,
+# and then do the backup, and call again on this script
+
+# set up nextBackUpTime according to the backup
+# variables
+backupInterval=`grep backupInterval $ServicesRoot/backupData.txt | cut -d" " -f2`
+
+daySeconds=`expr 3600 \* 24`
+weekInSeconds=`expr $daySeconds \* 7`
+if [ $backupInterval -eq $daySeconds ]
+then
+  intervalType="D"
+else
+  if [ $backupInterval -eq $weekInSeconds ]
+  then
+    intervalType="W"
+    intervalLetter="a"
+  else
+    intervalType="M"
+    intervalLetter="e"
+  fi
+fi
+
+# see if this is a day for a full backup
+if [ $backupPlan = "F" ] || [ $intervalType = "D" ] || [ `date +%$intervalLetter` = "$fullBackupDay" ] 
+then 
+  FullOrIncremental="F"
+else
+  FullOrIncremental="I"
+fi
+
+if [ $intervalType = "D" ]
+then
+  # do the backup the next time that the
+  # designated time of day is reached
+  backupDay=""
+else
+  if [ $intervalType = "W" ]
+  then
+    backupDay=$fullBackupDay
+  else
+    backupHour=`echo $backupTime | cut -c 1-2`
+    backupMinute=`echo $backupTime | cut -c 4-5`
+    currentTime=`date +%H%M%d%m%Y`
+    currentMinute=`echo $currentTime | cut -c 3-4`
+    currentHour=`echo $currentTime | cut -c 1-2`
+    currentDayInMonth=`echo $currentTime | cut -c 5-6`
+    currentMonth=`echo $currentTime | cut -c 7-8`
+    currentYear=`echo $currentTime | cut -c 9-10`
+    # first check if the backup time for this month 
+    # has passed or not
+    if [ $currentDayInMonth -gt $fullBackupDay ]
+    then
+      backupNextMonth="Y"
+    else
+      if [ $currentDayInMonth -lt $fullBackupDay ]
+      then
+        backupNextMonth="N"
+      else
+        # this is the day when the back is to be done -
+        # find if time of the backup has passed
+        if [ $currentHour -gt $backupHour ]
+        then
+          backupNextMonth="Y"
+        else
+          if [ $currentHour -lt $backupHour ]
+          then
+            backupNextMonth="N"
+          else
+            if [ $currentMinute -gt $backupMinute ]
+            then
+              backupNextMonth="Y"
+            else
+              backupNextMonth="N"
+            fi
+          fi
+        fi
+      fi
+    fi
+       
+    if [ $backupNextMonth = "Y" ]
+    then
+      # find the next month - switch year if neccessary
+      if [ $currentMonth < 12 ]
+      then
+        backupMonth=`expr $currentMonth + 1`
+        backupYear=$currentYear
+      else
+        backupMonth=1
+        backupYear=`expr $currentYear + 1`
+      fi
+    else
+      # things are simple - do it this month
+      backupMonth=$currentMonth
+      backupYear=$currentYear
+    fi
+    backupDay=$backupYear/$backupMonth/$fullBackupDay
+  fi
+fi
+nextBackUpTime="$backupTime $backupDay"
+
+echo
+echo Scheduling next backup for $nextBackUpTime
+echo
+
+# wait 1 minute before applying
+# at command for next backup -
+# to avoid "at: too late" error
+sleep 60
+at $nextBackUpTime << !
+$ServicesRoot/doBackup $ServicesRoot $FullOrIncremental $intervalType
+!
+

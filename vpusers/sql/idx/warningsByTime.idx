@@ -1,0 +1,4 @@
+/* index warnings by issue time */
+create index issueTimeIdx
+on warnings ( issuedOn )
+GO

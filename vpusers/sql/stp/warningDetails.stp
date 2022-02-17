@@ -1,0 +1,18 @@
+/* show the details of one warning --- */
+/* this is an interface for calling from an HTML GUI */
+CREATE PROC warningDetails
+( 
+  @warningID integer
+)
+AS
+BEGIN
+  SELECT users.nickName, users.registrationMode, 
+         content, issuedOn, 
+         u1.nickName AS whoIssued, u1.registrationMode AS issuerMode, 
+         comment
+    FROM warnings, users, users u1
+    WHERE warnings.warningID = @warningID AND
+          warnings.userID = users.userID  AND
+          warnings.issuedBy = u1.userID
+END
+GO 

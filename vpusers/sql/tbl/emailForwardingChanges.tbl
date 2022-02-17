@@ -1,0 +1,11 @@
+/*
+ * A record is added to this table to trigger action
+ * when an add-on service is changed for an account.
+ *
+ */
+CREATE TABLE emailForwardingChanges
+(
+	accountID	userIdentifier	NOT NULL
+)
+ON userDetailsSeg
+GO

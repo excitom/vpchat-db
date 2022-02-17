@@ -1,0 +1,6 @@
+CREATE VIEW getGMT
+AS
+  SELECT intValue AS gmt
+    FROM configurationKeys
+    WHERE keyName = "diffFromGMT"
+GO

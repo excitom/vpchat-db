@@ -1,0 +1,27 @@
+/*
+ * Keep track of reminder notes for an account.
+ *
+ * The notifyAcctID is used to find an email address to which
+ * the comment will be sent.
+ * 
+ * The repeatPeriod is measured in days.
+ *
+ * The cancelOnStatus, if set, is an account status value that will
+ * cause the notification to automatically cancel. For example "Don't
+ * bother reminding me to check for payment if the account status is 
+ * OK now". 
+ *
+ */
+CREATE TABLE reminders
+(
+	reminderID		userIdentifier			IDENTITY
+                        	constraint isPrimary primary key,
+	accountID		userIdentifier			NOT NULL,
+	notifyAcctID		userIdentifier			NOT NULL,
+	notifyDate		VpTime				NOT NULL,
+	repCount		smallInt			NOT NULL,
+	interval		smallInt			NOT NULL,
+	comment			longName			NULL,
+	cancelOnStatus		tinyint				NULL
+)
+GO

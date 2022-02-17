@@ -1,0 +1,331 @@
+/* update a user account record
+ * input:  accountID, status
+ * accountStatus:
+ *	0 = OK
+ *	1 = new
+ *	2 = pending
+ *	3 = closed
+ *	4 = suspended - penalty
+ *	5 = expired
+ *  output: Return value - 0 - success 
+ *                         20001 - No such account existed in database
+ */
+CREATE PROC updateAccountStatus (
+    @accountID userIdentifier,
+    @accountStatus tinyInt
+)
+AS
+BEGIN
+  DECLARE @lastError int
+  DECLARE @aid userIdentifier
+  DECLARE @diffFromGMT int
+  DECLARE @lastUpdated VpTime
+  DECLARE @oldStatus tinyint
+  DECLARE @paymentStatus tinyint
+
+  DECLARE @sOK		tinyint
+  DECLARE @sNew		tinyint
+  DECLARE @sPending	tinyint
+  DECLARE @sClosed	tinyint
+  DECLARE @sSuspended	tinyint
+  DECLARE @sExpired	tinyint
+  SELECT  @sOK		= 0
+  SELECT  @sNew		= 1
+  SELECT  @sPending	= 2
+  SELECT  @sClosed	= 3
+  SELECT  @sSuspended	= 4
+  SELECT  @sExpired	= 5
+  DECLARE @pOK		tinyint
+  DECLARE @pFailed	tinyint
+  SELECT  @pOK		= 0
+  SELECT  @pFailed	= 2
+  DECLARE @svcOK	tinyint
+  DECLARE @svcWaiting	tinyint
+  SELECT  @svcOK	= 0
+  SELECT  @svcWaiting	= 1
+  
+  BEGIN TRAN 
+    
+    SELECT @diffFromGMT = gmt
+      FROM getGMT
+    IF @diffFromGMT IS NULL
+      SELECT @diffFromGMT = 0
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN  
+      RETURN @lastError
+    END
+
+    SELECT @lastUpdated = dateadd( hour, (-1) * @diffFromGMT, getdate() )
+
+    SELECT @aid = accountID,
+           @oldStatus = accountStatus,
+           @paymentStatus = paymentStatus
+      FROM userAccounts
+      WHERE accountID = @accountID
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    IF @accountID != @aid
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20001
+    END
+
+    /*
+     * Clear failed pmt status if account is now OK
+     */
+    IF @accountStatus = @sOK AND @paymentStatus = @pFailed
+    BEGIN
+      SELECT @paymentStatus = @pOK
+    END
+
+    /*
+     * update the new status and the account change time stamp
+     */
+    UPDATE userAccounts
+      SET accountStatus = @accountStatus,
+          paymentStatus = @paymentStatus,
+          lastUpdated = @lastUpdated
+      WHERE accountID = @accountID
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+    
+    /*
+     * unlock user names if new status is OK or PENDING
+     * lock user names if new status is anything else
+     */
+    DECLARE @locked bit
+    IF @accountStatus = @sOK OR @accountStatus = @sPending
+      SELECT @locked = 0
+    ELSE
+      SELECT @locked = 1
+
+    UPDATE users
+      SET locked = @locked
+      WHERE users.userID IN
+        ( SELECT registration.userID
+          FROM   registration
+          WHERE  accountID = @accountID )
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN @lastError
+    END
+
+    /*
+     * if new status = CLOSED then deactivate subscription, if any
+     * note: if the subscription type is PayPal, leave it active. it must
+     * be cancelled manually.
+     */
+    IF @accountStatus = @sClosed AND EXISTS (SELECT * FROM subscriptions WHERE accountID = @accountID AND autoRenew = 1 AND type != 1)
+    BEGIN
+      UPDATE subscriptions SET autoRenew = 0 WHERE accountID = @accountID AND type != 1
+
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+    END
+
+    /*
+     * if new status = Expired then update renewal stats
+     */
+    IF @accountStatus = @sExpired
+    BEGIN
+      UPDATE renewals SET wentOverdue = wentOverdue + 1
+        WHERE accountID = @accountID
+
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+    END
+
+    /*
+     * if account status is OK, clear pending add-on services
+     */
+    IF @accountStatus = @sOK
+    BEGIN
+      DELETE pendingServices WHERE serviceID IN
+        (SELECT serviceID FROM services WHERE accountID = @accountID)
+
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+    END
+
+    IF @locked = 0
+    BEGIN
+      UPDATE services SET status = @svcOK WHERE accountID = @accountID
+    END
+    ELSE BEGIN
+      UPDATE services SET status = @svcWaiting WHERE accountID = @accountID
+    END
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+  COMMIT TRAN
+
+  /* subsequent non-critical updates are done outside the transaction
+   * to improve database performance.
+   */
+
+  /* clear reward points if account is closed or suspended */
+
+  IF (@accountStatus = @sClosed OR @accountStatus = @sSuspended)
+  AND EXISTS (SELECT * FROM userPoints WHERE userID IN
+    (SELECT u.userID FROM users u, registration r
+     WHERE r.accountID = @accountID AND r.userID=u.userID))
+  BEGIN
+    UPDATE userPoints SET points = 0 WHERE userID IN
+      (SELECT u.userID FROM users u, registration r
+       WHERE r.accountID = @accountID AND r.userID=u.userID)
+  END
+
+  /*
+   * Update services alert lists, if necessary.
+   */
+  DECLARE serviceCursor CURSOR
+    FOR SELECT serviceID, itemID, locked, type
+        FROM services
+        WHERE accountID = @accountID
+
+  DECLARE @serviceID userIdentifier
+  DECLARE @notifyID userIdentifier
+  DECLARE @type int
+  DECLARE @svcLocked bit
+  OPEN serviceCursor
+  FETCH serviceCursor INTO @serviceID, @notifyID, @svcLocked, @type
+  WHILE ( @@sqlstatus = 0 )
+  BEGIN
+    /*
+     * service is locked if administratively locked (svcLocked)
+     * or if the account is locked.
+     */
+    SELECT @svcLocked = @svcLocked | @locked
+    IF @type = 1 OR @type = 6
+    BEGIN
+      EXEC audset..updateNotifyList @notifyID, @svcLocked
+    END
+    -- ELSE IF @type = 2 OR @type = 4 OR @type = 5
+    -- BEGIN
+    -- END
+    ELSE IF @type = 3
+    BEGIN
+      UPDATE emailForwarding SET locked = @svcLocked WHERE serviceID = @serviceID
+    END
+    FETCH serviceCursor INTO @serviceID, @notifyID, @svcLocked, @type
+  END
+  CLOSE serviceCursor
+
+  /*
+   * Trigger email forwarding update
+   */
+  IF EXISTS (SELECT * FROM services WHERE accountID = @accountID AND type = 3)
+  BEGIN
+    INSERT emailForwardingChanges (accountID) VALUES (@accountID)
+  END
+
+  /*
+   * Lock/unlock user's home pages, if any.
+   *
+   * Delete the home pages if account is closing.
+   *
+   * This is done outside the transaction since it's not super
+   * critical that it succeed and we don't want failure to undo 
+   * the previous operations.
+   */
+   DECLARE @userID	userIdentifier
+   DECLARE @URL		UrlType
+   DECLARE @URL2	UrlType
+   DECLARE @maxSpace	int
+   DECLARE @maxTransfer	int
+ 
+   DECLARE userCursor CURSOR
+     FOR SELECT registration.userID, URL, URL2, maxSpace, maxTransfer
+       FROM registration, vpplaces..homePages
+       WHERE accountID = @accountID
+       AND   vpplaces..homePages.userID = registration.userID
+
+   OPEN userCursor
+   FETCH userCursor INTO @userID, @URL, @URL2, @maxSpace, @maxTransfer
+   WHILE ( @@sqlstatus = 0 )
+   BEGIN
+     IF @accountStatus = @sClosed
+     BEGIN
+       DECLARE @cleanup tinyint
+       SELECT @cleanup = 1
+       EXEC vpplaces..delHomePage @userID, @cleanup
+     END
+     ELSE BEGIN
+       IF @oldStatus = @sClosed AND @accountStatus != @sClosed
+       BEGIN
+         EXEC vpplaces..addHomePage @userID,@maxSpace,@maxTransfer,@URL,@URL2
+       END
+       IF @URL2 IS NOT NULL
+       BEGIN
+         SELECT @URL = @URL2
+       END
+       EXEC vpplaces..updateHomePage @userID, 'L', @locked, @URL
+     END
+     FETCH userCursor INTO @userID, @URL, @URL2, @maxSpace, @maxTransfer
+   END
+   CLOSE userCursor
+
+  /*
+   * If account has user-created chat rooms, update their status.
+   * this is done outside the transaction since it doesn't matter if
+   * it fails (as it will in many cases, e.g. account does not have
+   * a user-created room listing).
+   */
+  DECLARE @activate bit
+  IF @locked = 1
+  BEGIN
+    SELECT @activate = 0
+  END
+  ELSE BEGIN
+    SELECT @activate = 1
+  END
+  EXEC vpplaces..updateUserPlace @accountID, @activate
+
+  /*
+   * add history record, unless resetting an account to 'New'
+   * (this is usually done in preparation for deleting a test or bogus
+   *  account, so the history will be deleted anyway. this should rarely
+   *  occur and only for good reasons ...)
+   */
+  IF @accountStatus != 1
+  BEGIN
+    EXEC addAcctHistory @accountID, @accountStatus, @oldStatus, NULL, @lastUpdated, 1
+  END
+
+  RETURN 0
+END
+GO

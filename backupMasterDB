@@ -1,0 +1,28 @@
+#!/bin/sh
+
+# This script does the backup of the master database
+# only full backup is possible for this database
+
+########################
+# GET INPUT PARAMETERS #
+########################
+SybaseRoot=$1
+shift
+DBAdminLogin=$1
+shift
+DBAdminPasswd=$1
+shift
+dataServer=$1
+
+DbBackupDir=$SybaseRoot/db/backup
+
+echo
+echo doing backup of master database
+echo
+
+$SybaseRoot/bin/isql -U$DBAdminLogin -P$DBAdminPasswd -S$dataServer << !
+CHECKPOINT
+GO
+DUMP DATABASE master TO "$DbBackupDir/master.full.backupSet0"
+GO
+!

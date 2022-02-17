@@ -1,0 +1,26 @@
+/* Check if a someone has registered 
+   in the database using the given email address */
+/* input: email
+   output: @isRegistered parameter will be set to 1 if the user 
+   with this registration mode and nick
+   name is written in the database, 0 otherwise
+*/
+CREATE PROC emailIsRegistered
+(
+  @email longName,
+  @isRegistered int output
+)
+AS
+BEGIN
+  SELECT @email = lower(@email)
+  DECLARE @mail longName
+  SELECT @isRegistered = 0
+  SELECT DISTINCT @mail = email
+    FROM registration
+    WHERE ( email = @email )
+  IF ( @mail IS NOT NULL )
+  BEGIN
+    SELECT @isRegistered = 1
+  END
+END
+GO

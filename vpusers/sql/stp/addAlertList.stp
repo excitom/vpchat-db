@@ -1,0 +1,70 @@
+/*
+ * Add a user-owned alert list to an account.
+ *
+ * The alert lists are kept in the audset database, and due to 
+ * evolving naming conventions, they are known as notify lists.
+ *
+ * The information kept in the vpusers database involves the accounting
+ * information for charging the customer for usage.
+ *
+ * return code: 0 = success
+ *		20001 = unknown account
+ */
+CREATE PROC addAlertList ( 
+	@accountID	userIdentifier,
+	@notifyID	userIdentifier,
+	@description	VARCHAR(255)
+)
+AS
+BEGIN
+  DECLARE @lastError	int
+  DECLARE @diffFromGMT	int
+  DECLARE @unitCost	int
+  DECLARE @creationDate	VpTime
+
+  BEGIN TRAN
+
+    IF NOT EXISTS (SELECT * FROM userAccounts WHERE accountID = @accountID)
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20001
+    END 
+
+    SELECT @diffFromGMT = gmt
+      FROM getGMT
+    IF @diffFromGMT IS NULL
+      SELECT @diffFromGMT = 0
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN @lastError
+    END
+
+    SELECT @creationDate = dateadd( hour, (-1) * @diffFromGMT, getdate() )
+
+    SELECT @unitCost = intValue
+      FROM configurationKeys
+      WHERE keyName = 'userAlertCost'
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN @lastError
+    END
+
+    INSERT INTO services (accountID, itemID, unitCost, creationDate, type, status)
+        VALUES (@accountID, @notifyID, @unitCost, @creationDate, 1, 0)
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+  COMMIT TRAN
+END
+GO

@@ -1,0 +1,49 @@
+/* get demographic details for specified user
+
+   INPUT  : userID
+   OUTPUT : all details for that user (list to long to
+            put it here)
+            return value - 0 if successful
+	    20002 = no details for this user
+*/
+
+CREATE PROC getUserDetailsByID ( @userID userIdentifier )
+AS
+BEGIN
+  DECLARE @lastError int
+
+  BEGIN TRAN getUserDetails
+
+    IF NOT EXISTS (SELECT userID FROM userDetails WHERE userID = @userID )
+    BEGIN
+      ROLLBACK TRAN getUserDetails
+      RETURN 20002
+    END
+
+    SELECT
+	userID,
+	firstName,
+	lastName,
+        address,
+	city,
+	state,
+	country,
+	zipcode,
+	hobbies,
+	occupation,
+	personalQuote,
+  	location,
+  	email,
+	age,
+	gender
+      FROM userDetails
+      WHERE userID = @userID
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN getUserDetails
+    END
+  COMMIT TRAN getUserDetails
+END
+GO

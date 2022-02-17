@@ -1,0 +1,55 @@
+/* find all penalties that have expired in the last interval */
+CREATE PROC refreshPenalties
+AS
+BEGIN
+  DECLARE @currentTimeValue VpTime
+ 
+  DECLARE @lastError int
+  DECLARE @diffFromGMT int
+  DECLARE @issueTime VpTime
+  
+  BEGIN TRAN
+    SELECT @diffFromGMT = intValue
+      FROM configurationKeys
+      WHERE keyName = "diffFromGMT"
+    IF @diffFromGMT IS NULL
+      SELECT @diffFromGMT = 0
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+    
+    SELECT @issueTime = dateadd( hour, (-1) * @diffFromGMT, getdate() )
+    
+    /* show all the penalties for each user, with value to mark the expired penalties:
+       -1 or 0 means expiry of penalty */
+    /* forgiven field may recieve value of 0 (FALSE) or 1 (TRUE) - if its TRUE,
+       then penalty is considered expired */
+    SELECT nickName, registrationMode, penaltyType
+      FROM penalties, users
+      WHERE ( users.userID = penalties.userID ) AND
+            ( ( expiresOn <= @issueTime ) OR
+              ( forgiven=1 ) )
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+    
+    EXEC archivePenalties @issueTime
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+    
+  COMMIT TRAN
+END
+GO 

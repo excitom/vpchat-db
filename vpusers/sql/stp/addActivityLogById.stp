@@ -1,0 +1,63 @@
+/*
+ * Add an account activity log record.
+ * input:  accountID
+ *	   comment
+ *	   IP of who is adding the record
+ *         name of who is adding the record
+ *
+ */
+CREATE PROC addActivityLogById ( 
+	@accountID	userIdentifier,
+	@comment	longName,
+	@IP		varchar(20) = NULL,
+	@who		VPuserID = NULL
+)
+AS
+BEGIN
+  DECLARE @lastError	int
+  DECLARE @diffFromGMT  int
+  DECLARE @time  	VpTime
+
+  SELECT @diffFromGMT = gmt
+    FROM getGMT
+  IF @diffFromGMT IS NULL
+    SELECT @diffFromGMT = 0
+    
+  SELECT @lastError = @@error
+  IF @lastError != 0
+  BEGIN
+    RETURN @lastError
+  END
+
+  SELECT @time = dateadd( hour, (-1) * @diffFromGMT, getdate() )
+
+  BEGIN TRAN
+    
+    IF @who IS NULL
+    BEGIN
+      SELECT @who = nickName
+        FROM users,userAccounts
+        WHERE accountID = @accountID
+        AND   userID = ownerID
+    
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+    END
+    
+    INSERT INTO activityLog ( time, accountID, comment, who, IP )
+      VALUES ( @time, @accountID, @comment, @who, @IP )
+       
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+  COMMIT TRAN
+END
+GO

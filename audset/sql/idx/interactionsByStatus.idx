@@ -1,0 +1,4 @@
+/* interactions by status */
+CREATE INDEX interactionsByStatusIdx
+ON eventInteractions ( status, hostName )
+GO

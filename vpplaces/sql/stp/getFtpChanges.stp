@@ -1,0 +1,28 @@
+/*
+ * Dump the change records for FTP changes, and truncate
+ * the changes table.
+ *
+ * output: return value - 0 
+ */
+CREATE PROC getFtpChanges ( @server longName, @keep bit = 0 )
+AS
+BEGIN
+  BEGIN TRAN
+    SELECT change, nickName, pwEntry
+      FROM ftpChanges
+      WHERE server = @server
+      ORDER BY changeID ASC
+      
+    IF @keep = 0 AND @@rowcount > 0
+    BEGIN
+      DELETE ftpChanges
+        WHERE server = @server
+    END
+   
+  COMMIT TRAN
+  RETURN 0
+
+END
+GO
+GRANT EXECUTE ON getFtpChanges TO vpusr
+GO

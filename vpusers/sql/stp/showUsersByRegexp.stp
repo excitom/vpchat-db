@@ -1,0 +1,62 @@
+/* display all users with names matching a given wildcard expression */
+/* input:  wildcard expression, registration mode (default=2)
+   output: list of all matching nicknames (with userID) 
+*/
+CREATE PROC showUsersByRegexp ( @@wildcard VPuserID, @@registrationMode int = 2 )
+AS
+BEGIN
+  DECLARE @@convertedWildcard VPuserID
+  DECLARE @@pos tinyint
+  DECLARE @@length tinyint
+  DECLARE @@currentChar varchar(1)
+  /* first, convert wildcard to sybase wildcard syntax */
+  
+  SELECT @@convertedWildcard = ltrim("")
+  SELECT @@pos = 1
+  SELECT @@length = char_length( @@wildcard )
+  
+  WHILE @@pos <= @@length
+  BEGIN
+    SELECT @@currentChar = substring( @@wildcard, @@pos, 1 )
+    SELECT @@pos = @@pos + 1
+  
+    /* change "%" to "#%" */
+    IF ( @@currentChar = "%" )
+    BEGIN
+      SELECT @@convertedWildcard = @@convertedWildcard + "#%"
+      CONTINUE
+    END
+  
+    /* change "_" to "#_" */
+    IF ( @@currentChar = "_" )
+    BEGIN
+      SELECT @@convertedWildcard = @@convertedWildcard + "#_"
+      CONTINUE
+    END
+  
+    /* change "*" to "%" */
+    IF ( @@currentChar = "*" )
+    BEGIN
+      SELECT @@convertedWildcard = @@convertedWildcard + "%"
+      CONTINUE
+    END
+  
+    /* change "?" to "_" */
+    IF ( @@currentChar = "?" )
+    BEGIN
+      SELECT @@convertedWildcard = @@convertedWildcard + "_"
+      CONTINUE
+    END
+  
+    /* any other character is just appnded as is */
+    SELECT @@convertedWildcard = @@convertedWildcard + @@currentChar
+  END
+  
+  /* now find the matches */
+  SELECT nickName, userID
+    FROM users
+    WHERE ( registrationMode = @@registrationMode ) AND
+          ( nickName LIKE @@convertedWildcard ESCAPE "#" )
+
+END
+GO

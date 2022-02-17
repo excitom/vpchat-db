@@ -1,0 +1,317 @@
+/*
+ * Add an add-on service item to a user account.
+ *
+ * Some services, like personal alert lists, involve an object in
+ * another table or database. The itemID points to this object. Other
+ * services, like email forwarding and web space, only involve an
+ * integer quantity (e.g. number of names that can forward, megabytes
+ * of extra space). These services use the quantity column rather than
+ * the itemID column.
+ *
+ * Input: Account ID, Item ID, type
+ *
+ * Output: 0 = success
+ *         20000 = unknown account
+ *         20001 = unknown item
+ *         20002 = item already added
+ *         20003 = unknown type
+ */
+CREATE PROC addServiceToAcct (
+		@accountID userIdentifier,
+		@itemID    userIdentifier = NULL,
+		@quantity  integer = NULL,
+		@type      smallint,
+		@unitCost  smallmoney,
+		@cost      smallmoney	-- initial upgrade cost
+)
+AS
+BEGIN
+  DECLARE @lastError	int
+  DECLARE @diffFromGMT	int
+  DECLARE @retVal     	int
+  DECLARE @status	int
+  DECLARE @creationDate	VpTime
+  DECLARE @serviceID	userIdentifier
+  DECLARE @balance	smallmoney
+  DECLARE @comment	longName
+
+  BEGIN TRAN
+
+    IF NOT EXISTS( SELECT * FROM userAccounts WHERE accountID = @accountID )
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20000
+    END
+
+    IF @itemID IS NOT NULL
+    BEGIN
+      IF EXISTS( SELECT * FROM services WHERE itemID = @itemID AND type = @type )
+      BEGIN
+        ROLLBACK TRAN
+        RETURN 20002
+      END
+    END
+
+    /*
+     * personal alert list
+     */
+    IF @type = 1 OR @type = 4
+    BEGIN
+
+      EXEC @retVal = audset..checkNotifyList @itemID
+    
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN 
+        RETURN @lastError
+      END
+
+      IF @retVal != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN 20001
+      END
+
+      IF @type = 1
+      BEGIN
+        SELECT @comment = 'add private alert list serivce'
+      END
+      ELSE BEGIN
+        SELECT @comment = 'add private alert list serivce (bundle with email, web space)'
+      END
+    END
+
+    /*
+     * web page space
+     */
+    ELSE IF @type = 2
+    BEGIN
+      IF @quantity IS NULL OR @itemID IS NOT NULL
+      BEGIN
+        ROLLBACK TRAN
+        RETURN 20001
+      END
+
+      SELECT @comment = 'add extra web space'
+    END
+
+    /*
+     * email forwarding
+     */
+    ELSE IF @type = 3
+    BEGIN
+      IF @quantity IS NULL OR @itemID IS NOT NULL
+      BEGIN
+        ROLLBACK TRAN
+        RETURN 20001
+      END
+
+      SELECT @comment = 'add email forwarding'
+    END
+
+    /*
+     * presence group
+     */
+    ELSE IF @type = 5
+    BEGIN
+	-- place holder
+	SELECT @retVal = 0
+    END
+
+    /*
+     * game ladder
+     */
+    ELSE IF @type = 6
+    BEGIN
+
+      EXEC @retVal = audset..checkNotifyList @itemID
+    
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN 
+        RETURN @lastError
+      END
+
+      IF @retVal != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN 20001
+      END
+
+      SELECT @comment = 'add game ladder serivce'
+    END
+
+    ELSE BEGIN
+      ROLLBACK TRAN
+      RETURN 20003
+    END
+
+    SELECT @diffFromGMT = gmt
+      FROM getGMT
+    IF @diffFromGMT IS NULL
+      SELECT @diffFromGMT = 0
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN @lastError
+    END
+
+    /* 
+     * record a debit for the cost
+     */
+    DECLARE @debit smallmoney
+    SELECT @debit = 0 - @cost
+    
+    EXEC addPayment @accountID, @debit, @comment
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN @lastError
+    END
+
+    /*
+     * Set status if money owed
+     */
+    SELECT @balance = subscription
+      FROM accountBalance
+      WHERE accountID = @accountID
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN @lastError
+    END
+
+    IF @balance > 0
+    BEGIN
+      SELECT @status = 1
+      EXEC updatePaymentStatus @accountID, 3
+    END
+    ELSE BEGIN
+      SELECT @status = 0
+    END
+    
+    /*
+     * create a service record for this account
+     * - the lock flag is for administrative locking.
+     * e.g. payment is pending and service is locked. payment should
+     * not unlock the service in this case.
+     *
+     * if creating a bundle, several records are inserted
+     */
+    SELECT @creationDate = dateadd( hour, (-1) * @diffFromGMT, getdate() )
+
+    IF @type = 4
+    BEGIN
+      INSERT INTO services (accountID, itemID, creationDate, type, quantity, unitCost, status, locked)
+        VALUES (@accountID, NULL, @creationDate, @type, @quantity, @unitCost, @status, 0)
+    
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN 
+        RETURN @lastError
+      END
+
+      SELECT @serviceID = @@identity
+
+      /* insert record for the alert list in the bundle, unit cost 0 */
+      INSERT INTO services (accountID, itemID, creationDate, type, quantity, unitCost, status, locked, bundleID)
+        VALUES (@accountID, @itemID, @creationDate, 1, @quantity, 0, @status, 0, @serviceID)
+    
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN 
+        RETURN @lastError
+      END
+
+      SELECT @quantity = intValue
+        FROM configurationKeys
+        WHERE keyName = 'extraWebSpaceQty'
+
+      /* insert record for the web space in the bundle, unit cost 0 */
+      INSERT INTO services (accountID, itemID, creationDate, type, quantity, unitCost, status, locked, bundleID)
+        VALUES (@accountID, NULL, @creationDate, 2, @quantity, 0, @status, 0, @serviceID)
+    
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN 
+        RETURN @lastError
+      END
+
+      SELECT @quantity = intValue
+        FROM configurationKeys
+        WHERE keyName = 'emailForwardingMax'
+
+      /* insert record for the email forwarding in the bundle, unit cost 0 */
+      INSERT INTO services (accountID, itemID, creationDate, type, quantity, unitCost, status, locked, bundleID)
+        VALUES (@accountID, NULL, @creationDate, 3, @quantity, 0, @status, 0, @serviceID)
+    
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN 
+        RETURN @lastError
+      END
+    END
+    /* not a bundle */
+    ELSE BEGIN
+      INSERT INTO services (accountID, itemID, creationDate, type, quantity, unitCost, status, locked)
+        VALUES (@accountID, @itemID, @creationDate, @type, @quantity, @unitCost, @status, 0)
+    
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN 
+        RETURN @lastError
+      END
+
+      SELECT @serviceID = @@identity
+    END
+
+    /*
+     * keep track of the initial cost if money owed
+     */
+    IF @status = 1
+    BEGIN
+      INSERT pendingServices (serviceID, upgradeCost)
+        VALUES (@serviceID, @cost)
+    
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN 
+        RETURN @lastError
+      END
+    END
+
+    /*
+     * trigger service update if email forwarding was affected
+     */
+    IF @type = 3 OR @type = 4
+    BEGIN
+      INSERT emailForwardingChanges (accountID) VALUES (@accountID)
+    
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN 
+        RETURN @lastError
+      END
+    END
+
+    SELECT @serviceID AS serviceID
+
+  COMMIT TRAN
+
+END
+GO

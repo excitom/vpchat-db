@@ -1,0 +1,12 @@
+CREATE TABLE categories
+(
+	category	categoryIdentifier	IDENTITY
+                        CONSTRAINT isPrimary primary key,
+	description	varchar(30)		NOT NULL,
+	parentCategeory	categoryIdentifier	NULL
+                        CONSTRAINT parentCategoryRefCategories REFERENCES categories,
+		CONSTRAINT uniqueCategoryName 
+			UNIQUE( parentCategeory, description ),
+	catOrder	tinyint
+)
+GO

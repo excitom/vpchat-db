@@ -1,0 +1,12 @@
+/* display all users in registration table */
+/* input:  NONE
+   output: list of all entries in registration table */
+CREATE PROC showAllUsers
+AS
+BEGIN
+  SELECT users.nickName, registration.*
+    FROM registration, users
+    WHERE registration.userID = users.userID
+    ORDER BY nickName
+END
+GO

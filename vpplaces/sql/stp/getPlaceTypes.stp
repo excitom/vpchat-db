@@ -1,0 +1,14 @@
+/* get details of all places types */
+/* input:  NONE
+   output: list of place types, stating -
+   type, min people for showing a place, sort order, 
+   unify replicates flag, exclude shadow places flag
+*/
+CREATE PROC getPlaceTypes
+AS
+BEGIN
+  SELECT *
+    FROM placeTypes
+    ORDER BY type
+END
+GO

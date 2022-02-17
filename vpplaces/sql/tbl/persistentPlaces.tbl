@@ -1,0 +1,13 @@
+CREATE TABLE persistentPlaces
+(
+	URL		longName			NOT NULL
+			constraint isPrimary primary key,
+	type		integer				NOT NULL,
+	title		longName			NOT NULL,
+	roomCapacity	integer				NOT NULL,
+	roomProtected	bit				NOT NULL,
+	numberOfRows	integer				NOT NULL,
+	rowSize		integer				NOT NULL,
+	rowPrefix	longName			NOT NULL
+)
+GO

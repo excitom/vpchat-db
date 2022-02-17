@@ -1,0 +1,27 @@
+/* Create Results table for the procedure getCategoryTree */
+CREATE PROC createTreeTable 
+AS
+BEGIN
+DECLARE @lastError integer
+CREATE TABLE tempdb..TreeTable (
+	treeLevel integer,
+	type  char(1),
+	catId numeric(6,0) NULL,
+	name  varchar(255),
+	protectedFlag bit,
+        vptype integer NULL,
+	title varchar(255)  NULL,
+	capacity integer  NULL,
+	audName varchar(255) NULL,
+        audId   numeric(10,0) NULL,
+	client  varchar(255)  NULL,
+	welcomeMsg1 varchar(255)  NULL,
+	welcomeMsg2 varchar(255) NULL,
+	rowSize     integer  NULL,
+	numRows     integer  NULL
+)
+SELECT @lastError = @@error
+IF @lastError != 0
+  RETURN 20001
+END
+GO

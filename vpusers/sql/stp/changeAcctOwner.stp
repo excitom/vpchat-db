@@ -1,0 +1,82 @@
+/* change which user name is the account owner for an account */
+/* input:  user name, account ID
+   output: 0   OK
+           20001 can't find accountID
+           20002 name has different accountID
+ */
+CREATE PROC changeAcctOwner ( @nickName VPuserID, @accountID userIdentifier )
+AS
+BEGIN
+  DECLARE @diffFromGMT int
+  DECLARE @currentDate VpTime
+  DECLARE @userID userIdentifier
+  DECLARE @aid userIdentifier
+  DECLARE @lastError int
+
+  BEGIN TRAN
+    SELECT @diffFromGMT = gmt
+      FROM getGMT
+    IF @diffFromGMT IS NULL
+      SELECT @diffFromGMT = 0
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    SELECT @currentDate = dateadd( hour, (-1) * @diffFromGMT, getdate() )
+
+    SELECT @aid = accountID
+    FROM userAccounts
+    WHERE accountID = @accountID
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    IF @aid != @accountID
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20001
+    END
+
+    SELECT @nickName = lower(@nickName)
+    SELECT @userID = users.userID,
+           @aid = accountID
+      FROM users,registration
+      WHERE nickName = @nickName
+      AND   registrationMode = 2
+      AND   users.userID=registration.userID
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    IF @aid != @accountID
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20002
+    END
+
+    UPDATE userAccounts
+      SET ownerID = @userID,
+          lastUpdated = @currentDate
+      WHERE accountID = @accountID
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN @lastError
+    END
+  COMMIT TRAN
+END
+GO 

@@ -1,0 +1,52 @@
+/*
+ * Search for pattern in activity log messages
+ * input:  pattern
+ *         flag, 1 = ascending date/time, 0 = descending
+ *         from/to date/time range (default = past month)
+ *         client time zone (output date/time is relative to this TZ)
+ *
+ * output: Return value - 0 - success 
+ *
+ */
+CREATE PROC searchActivityLog ( 
+	@pattern	longName,
+	@asc		bit = 1,
+	@from		VpTime = NULL,
+	@to		VpTime = NULL,
+	@clientTZ	int = 0
+)
+AS
+BEGIN
+
+  IF @from IS NULL
+  BEGIN
+    SELECT @from = getDate()
+    SELECT @from = dateadd( month, -1, @from )
+  END
+  IF @to IS NULL
+    SELECT @to = getDate()
+
+  SELECT @from = dateadd( hour, (-1) * @clientTZ, @from )
+  SELECT @to   = dateadd( hour, (-1) * @clientTZ, @to   )
+
+
+  IF @asc = 1
+  BEGIN
+     SELECT accountID, dateadd(hour, @clientTZ, time) AS when, comment, who, IP
+       FROM activityLog
+       WHERE lower(comment) LIKE @pattern
+       AND   time >= @from
+       AND   time <= @to
+       ORDER BY time ASC
+  END
+  ELSE BEGIN
+     SELECT accountID, dateadd(hour, @clientTZ, time) AS when, comment, who, IP
+       FROM activityLog
+       WHERE lower(comment) LIKE @pattern
+       AND   time >= @from
+       AND   time <= @to
+       ORDER BY time DESC
+  END
+
+END
+GO

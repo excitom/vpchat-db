@@ -1,0 +1,15 @@
+/*
+ * This table is used to hold authorized transactions that need to
+ * be settled. It will usually be empty. Web pages that create payment
+ * transactions will add rows, and a cron job will remove and process
+ * all rows periodically.
+ */
+CREATE TABLE settlements
+(
+	settlementID	userIdentifier	IDENTITY NOT NULL,
+	invoice		longName	NOT NULL,
+	orderID		varchar(20)	NOT NULL,
+	AVS_result	varchar(10)	NOT NULL,
+	approvalCode	varchar(6)	NOT NULL
+)
+GO

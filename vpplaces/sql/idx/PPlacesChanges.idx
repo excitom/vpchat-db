@@ -1,0 +1,5 @@
+/* index persistent places changes by 
+   type of change and URL */
+CREATE UNIQUE INDEX PPlaceChangesIdx
+ON persistentPlacesChange ( change, URL )
+GO

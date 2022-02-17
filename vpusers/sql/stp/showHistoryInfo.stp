@@ -1,0 +1,142 @@
+/* 
+ * Show information about account registrations
+ *
+ * Input:
+ *  Reason code
+ *  Sort direction (1=ASC, 0=DESC)
+ *  Sort by (1=date, 0=quantity per day)
+ *  Range (0=all, 1=year, 2=quarter, 3=month, 4=day)
+ *  Flag: 1=show average, 0=don't
+ *
+ * Output rows, one per day:
+ *  Date (YYYY mm dd)
+ *  Count of items matching the input reason code
+ *  
+ *  Plus, if the 'show average' flag is set, output one row with the
+ *  average. The YYYY mm dd is 0 0 0.
+ *
+ */
+CREATE PROC showHistoryInfo (
+  @reason       tinyint,
+  @direction	bit = 1,
+  @byDate 	bit = 1,
+  @range        tinyint = 4,
+  @showAvg      bit = 0,
+  @clientTZ     int = 0
+)
+AS
+BEGIN
+  DECLARE @date VpTime
+  DECLARE @d1   VpTime
+  DECLARE @lastError int
+
+  SELECT @date = getdate()
+  SELECT @date = dateadd( hour,   (-1) * datepart( hour,   @date ), @date )
+  SELECT @date = dateadd( minute, (-1) * datepart( minute, @date ), @date )
+  SELECT @date = dateadd( second, (-1) * datepart( second, @date ), @date )
+  
+  IF @range > 5
+  BEGIN
+    RETURN 20000
+  END
+  IF @range = 0
+  BEGIN
+    SELECT @date = dateadd( year, -1, @date )
+  END
+  IF @range = 1
+  BEGIN
+    SELECT @date = dateadd( month, -4, @date )
+  END
+  IF @range = 2
+  BEGIN
+    SELECT @date = dateadd( month, -1, @date )
+  END
+  IF @range = 3
+  BEGIN
+    SELECT @date = dateadd( week, -1, @date )
+  END
+  IF @range = 4
+  BEGIN
+    SELECT @date = dateadd( day, -1, @date )
+  END
+  -- IF @range = 5
+  -- BEGIN
+    -- SELECT @date = dateadd( day, 0, @date )
+  -- END
+
+  IF @direction = 1
+  BEGIN
+   IF @byDate = 1
+   BEGIN
+    SELECT COUNT(accountID) AS amount,
+           datepart(YY, dateadd(hour, @clientTZ, time)) AS year,
+           datepart(mm, dateadd(hour, @clientTZ, time)) AS month,
+           datepart(dd, dateadd(hour, @clientTZ, time)) AS day
+      FROM  accountHistory
+      WHERE dateadd(hour, @clientTZ, time) >= @date
+      AND   reason = @reason
+      GROUP BY datepart(YY, dateadd(hour, @clientTZ, time)),
+               datepart(mm, dateadd(hour, @clientTZ, time)),
+               datepart(dd, dateadd(hour, @clientTZ, time))
+      ORDER BY datepart(YY, dateadd(hour, @clientTZ, time)),
+               datepart(mm, dateadd(hour, @clientTZ, time)),
+               datepart(dd, dateadd(hour, @clientTZ, time))
+   END
+   ELSE BEGIN
+    SELECT COUNT(accountID) AS amount,
+           datepart(YY, dateadd(hour, @clientTZ, time)) AS year,
+           datepart(mm, dateadd(hour, @clientTZ, time)) AS month,
+           datepart(dd, dateadd(hour, @clientTZ, time)) AS day
+      FROM  accountHistory
+      WHERE dateadd(hour, @clientTZ, time) >= @date
+      AND   reason = @reason
+      GROUP BY datepart(YY, dateadd(hour, @clientTZ, time)),
+               datepart(mm, dateadd(hour, @clientTZ, time)),
+               datepart(dd, dateadd(hour, @clientTZ, time))
+      ORDER BY COUNT(accountID)
+   END
+  END
+  ELSE BEGIN
+   IF @byDate = 1
+   BEGIN
+    SELECT COUNT(accountID) AS amount,
+           datepart(YY, dateadd(hour, @clientTZ, time)) AS year,
+           datepart(mm, dateadd(hour, @clientTZ, time)) AS month,
+           datepart(dd, dateadd(hour, @clientTZ, time)) AS day
+      FROM  accountHistory
+      WHERE dateadd(hour, @clientTZ, time) >= @date
+      AND   reason = @reason
+      GROUP BY datepart(YY, dateadd(hour, @clientTZ, time)),
+               datepart(mm, dateadd(hour, @clientTZ, time)),
+               datepart(dd, dateadd(hour, @clientTZ, time))
+      ORDER BY datepart(YY, dateadd(hour, @clientTZ, time)) DESC,
+               datepart(mm, dateadd(hour, @clientTZ, time)) DESC,
+               datepart(dd, dateadd(hour, @clientTZ, time)) DESC
+   END
+   ELSE BEGIN
+    SELECT COUNT(accountID) AS amount,
+           datepart(YY, dateadd(hour, @clientTZ, time)) AS year,
+           datepart(mm, dateadd(hour, @clientTZ, time)) AS month,
+           datepart(dd, dateadd(hour, @clientTZ, time)) AS day
+      FROM  accountHistory
+      WHERE dateadd(hour, @clientTZ, time) >= @date
+      AND   reason = @reason
+      GROUP BY datepart(YY, dateadd(hour, @clientTZ, time)),
+               datepart(mm, dateadd(hour, @clientTZ, time)),
+               datepart(dd, dateadd(hour, @clientTZ, time))
+      ORDER BY COUNT(accountID)
+      DESC
+   END
+  END
+  IF @showAvg = 1
+  BEGIN
+    SELECT AVG(COUNT(accountID)) AS average, 0, 0, 0
+      FROM  accountHistory
+      WHERE dateadd(hour, @clientTZ, time) >= @date
+      AND   reason = @reason
+      GROUP BY datepart(YY, dateadd(hour, @clientTZ, time)),
+               datepart(mm, dateadd(hour, @clientTZ, time)),
+               datepart(dd, dateadd(hour, @clientTZ, time))
+  END
+END
+GO

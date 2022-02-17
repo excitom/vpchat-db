@@ -1,0 +1,16 @@
+CREATE TABLE subscriptions
+(
+	accountID	userIdentifier			NOT NULL,
+	creationDate	VpTime				NOT NULL,
+	type		smallint			NOT NULL,
+--		0 = none (e.g. complimentary)
+--		1 = paypal (comment should contain subscriber ID)
+--		2 = credit card (ccID has details)
+--		3 = electronic check (ccID is really ecID)
+        autoRenew	bit,
+--		should always be TRUE unless customer has asked to cancel
+	ccID		userIdentifier			NULL,
+	comment		varchar(240)			NULL,
+		CONSTRAINT uniqueSubscr UNIQUE ( accountID, type, comment )
+)
+GO

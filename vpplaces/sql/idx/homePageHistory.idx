@@ -1,0 +1,4 @@
+/* index home page history by userID  */
+CREATE INDEX homePagesStatsByIdIdx
+ON homePageHistory ( userID )
+GO

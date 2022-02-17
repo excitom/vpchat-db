@@ -1,0 +1,35 @@
+#!/bin/sh
+
+# allocate (additional) space on a database disk device to a specific database
+
+if [ $# -lt 8 ]
+then
+  # not enough parameters given - show usage message
+  echo $0: usage - 
+  echo allocateDevice {sybase Root Dir} {Db Content Dir} {device Name} {allocation size} {DB Name} {sa Login} {sa Password} {data Server}
+  exit
+else
+  # get parameters
+  sybaseRoot=$1
+  shift
+  ServicesRoot=$1
+  shift
+  deviceName=$1
+  shift
+  allocatedSize=$1
+  shift
+  dbName=$1
+  shift
+  saLogin=$1
+  shift
+  saPassword=$1
+  shift
+  dataServer=$1
+  shift
+fi
+
+$sybaseRoot/bin/isql -U$saLogin -P$saPassword -S$dataServer << !
+ALTER DATABASE $dbName
+  ON $deviceName = $allocatedSize
+GO
+!

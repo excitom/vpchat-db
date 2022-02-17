@@ -1,0 +1,89 @@
+/* add a new auditorium persistent place to the database */
+/* input:  URL, type, title, room Capacity, num. of rows, row size,
+		row prefix
+   output: return value - 0 if successfull,
+                          20001 if URL is already in use 
+                                by an existing persistent place
+*/
+CREATE PROC addPersistentPlace
+(
+  @URL			longName,
+  @type			integer,
+  @title		longName,
+  @roomCapacity		integer,
+  @protected		bit,
+  @numberOfRows		integer,
+  @rowSize		integer,
+  @rowPrefix		longName
+)
+AS
+BEGIN
+  DECLARE @lastError int
+  DECLARE @diffFromGMT int
+  DECLARE @existingURL longName
+
+  BEGIN TRAN
+    /* try to find an existing
+       persistent place using
+       the same URL */
+    SELECT @existingURL = URL
+      FROM persistentPlaces
+      WHERE URL = @URL 
+   
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+  
+    IF @existingURL IS NOT NULL
+    BEGIN
+      /* fond an existing
+         persistent place
+         using the same URL */
+      ROLLBACK TRAN
+      RETURN 20001
+    END
+  
+    SELECT @diffFromGMT = gmt
+    FROM vpusers..getGMT
+   
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+   INSERT persistentPlaces
+      ( URL, type, title, roomCapacity, 
+	roomProtected, numberOfRows, rowSize, rowPrefix  )
+      VALUES 
+      ( @URL, @type, @title, @roomCapacity, 
+	@protected, @numberOfRows, @rowSize, @rowPrefix )
+   
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    /* add a change record */
+    INSERT persistentPlacesChange
+    VALUES(dateadd(hour, (-1) * @diffFromGMT, getdate()), @URL, "A")
+        
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+  COMMIT TRAN
+
+END
+GO
+GRANT EXECUTE ON addPersistentPlace TO vpusr
+GO

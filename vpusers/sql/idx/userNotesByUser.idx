@@ -1,0 +1,3 @@
+create index userNotesByUser
+on userNotes ( userID )
+GO

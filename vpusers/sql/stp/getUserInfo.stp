@@ -1,0 +1,66 @@
+/* 
+ * Get information about a user account holder.
+ * Input: accountID
+ * Output: several result sets
+ *         
+ *        return 0 - success
+ *           20001 - account not found
+ */
+CREATE PROC getUserInfo ( @accountID userIdentifier )
+AS
+BEGIN
+
+  DECLARE @lastError   int
+  DECLARE @city		VARCHAR(50)
+  DECLARE @countrycode	CHAR(2)
+  DECLARE @name_first	VARCHAR(50)
+  DECLARE @name_last	VARCHAR(50)
+  DECLARE @postalcode	VARCHAR(20)
+  DECLARE @stateprov	VARCHAR(30)
+  DECLARE @street_line1	VARCHAR(50)
+  DECLARE @phone_number	VARCHAR(16)
+  DECLARE @DLnumber	VARCHAR(20)
+  DECLARE @DLstate	VARCHAR(65)
+  DECLARE @DOB		VARCHAR(10)
+  DECLARE @aid		userIdentifier
+
+  BEGIN TRAN
+  
+    SELECT @aid = accountID,
+           @city = city,
+           @countrycode = countrycode,
+           @name_first = name_first,
+           @name_last = name_last,
+           @postalcode = postalcode,
+           @stateprov = stateprov,
+           @phone_number = phone_number,
+           @street_line1 = street_line1,
+           @DLnumber = DLnumber,
+           @DLstate = DLstate,
+           @DOB	= DOB
+      FROM userInfo
+      WHERE accountID = @accountID
+
+    IF @aid = @accountID
+    BEGIN
+      SELECT 'UI01', @city
+      SELECT 'UI02', @countrycode
+      SELECT 'UI03', @name_first
+      SELECT 'UI04', @name_last
+      SELECT 'UI05', @postalcode
+      SELECT 'UI06', @stateprov
+      SELECT 'UI07', @phone_number
+      SELECT 'UI08', @street_line1
+      SELECT 'UI09', @DLnumber
+      SELECT 'UI10', @DLstate
+      SELECT 'UI11', @DOB
+    END
+    ELSE
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20001
+    END
+
+  COMMIT TRAN
+END
+GO 

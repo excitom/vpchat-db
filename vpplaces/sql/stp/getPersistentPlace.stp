@@ -1,0 +1,16 @@
+/* getPersistentPlace returns all the parameters relevent to a cool place
+   INPUT: URL
+   OUTPUT: URL, type, title, roomCapacity. roomProtected, numberOfRows,
+	   rowSize, rowPrefix
+*/
+
+CREATE PROC getPersistentPlace (@URL longName)
+AS
+   SELECT * 
+	FROM persistentPlaces
+	WHERE URL = @URL
+GO
+
+
+
+	

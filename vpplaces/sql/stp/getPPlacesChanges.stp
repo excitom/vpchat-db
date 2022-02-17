@@ -1,0 +1,22 @@
+/* find all persistent places changes */
+CREATE PROC getPPlacesChanges
+AS
+BEGIN
+
+  /* find added data */
+  SELECT DATA.*
+    FROM persistentPlacesChange,
+        persistentPlaces DATA
+    WHERE persistentPlacesChange.URL = DATA.URL
+    AND change = "A"
+
+  /* find all changes */
+  SELECT URL,change
+    FROM persistentPlacesChange
+
+  DELETE 
+    FROM persistentPlacesChange
+
+END
+GO 
+

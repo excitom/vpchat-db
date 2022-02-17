@@ -1,0 +1,6 @@
+CREATE TABLE auditoriumChanges
+(
+	auditoriumID	numeric(6,0)			NOT NULL,
+        fieldID		integer				NOT NULL
+)
+GO

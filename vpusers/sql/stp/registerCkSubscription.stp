@@ -1,0 +1,119 @@
+/* add a new subscription record for a customer who pays
+   with a paper check. 
+
+   we set up an echeck record, so that this customer can
+   easily use echeck in the future. 
+
+   output: return value -
+           negative value - DB failure, 
+           0 - success, new subscription
+           1 - success, updated subscription
+           20001 - unknown accountID
+           20002 - account closed or suspended
+*/
+CREATE PROC registerCkSubscription
+( 
+  @accountID userIdentifier,
+  @ccID userIdentifier
+)
+AS
+BEGIN
+  DECLARE @lastError int
+  DECLARE @diffFromGMT int
+  DECLARE @aid userIdentifier
+  DECLARE @accountStatus tinyint
+  DECLARE @type tinyint
+  DECLARE @autoRenew bit
+  DECLARE @creationDate VpTime
+
+  SELECT @type = 3	-- account type 3 = electronic check
+  SELECT @autoRenew = 0	-- can't be auto-renew since it's a paper check
+
+  BEGIN TRAN
+    SELECT @diffFromGMT = gmt
+      FROM getGMT
+    IF @diffFromGMT IS NULL
+      SELECT @diffFromGMT = 0
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN registerNewUser
+      RETURN @lastError
+    END
+
+    SELECT @creationDate = dateadd( hour, (-1) * @diffFromGMT, getdate() )
+
+    SELECT @accountStatus = accountStatus
+      FROM userAccounts
+      WHERE accountID = @accountID
+
+    IF @accountStatus IS NULL
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN 20001
+    END
+
+    IF @accountStatus = 3 OR @accountStatus = 4
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN 20002
+    END
+
+    /*
+     * see if there is an existing subscription of this type
+     */
+    SELECT @aid = accountID
+      FROM subscriptions
+      WHERE accountID = @accountID
+      AND   type = @type
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN @lastError
+    END
+
+    /* new subscription */
+    IF @aid IS NULL
+    BEGIN
+      INSERT INTO subscriptions
+        (accountID, type, creationDate, ccID, autoRenew)
+        VALUES (@accountID, @type, @creationDate, @ccID, @autoRenew)
+
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN 
+        RETURN @lastError
+      END
+      SELECT @lastError = 0
+    END
+    /* updating an existing subscription with ccID,
+     * since user may be using a different acct
+     */
+    ELSE
+    BEGIN
+      UPDATE subscriptions
+        SET ccID         = @ccID
+        WHERE accountID  = @accountID
+        AND type = @type
+
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN 
+        RETURN @lastError
+      END
+      SELECT @lastError = 1
+   END
+   COMMIT TRAN
+   RETURN @lastError
+
+   /*
+    * add a history record
+    */
+    EXEC addAcctHistory @accountID, 23, 0, NULL
+END
+GO 

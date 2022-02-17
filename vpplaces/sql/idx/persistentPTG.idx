@@ -1,0 +1,5 @@
+/* index persistent PTG by 
+   type and serial number */
+CREATE UNIQUE INDEX persistentPTGIdx
+ON PersistentPTGlist ( type, serialNumber )
+GO

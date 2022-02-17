@@ -1,0 +1,19 @@
+/* 
+ * Log of activity, by account
+ *
+ * This information complements the accountHistory table. Records in
+ * this table result from user actions. Records in the accountHistory
+ * result from system actions. There may be overlap, e.g. a record in
+ * each table relating to the same event.
+ *
+ */
+CREATE TABLE activityLog
+(
+	accountID	userIdentifier			NOT NULL,
+        time		datetime			NOT NULL,
+	comment		varchar(255)			NULL,
+	who		VPuserID			NULL,
+	IP		varchar(20)			NULL
+)
+ON userDetailsSeg
+GO

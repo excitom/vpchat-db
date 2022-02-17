@@ -1,0 +1,14 @@
+/*
+ * A private notify list may require the owner's approval before
+ * subscribing. This table tracks pending requests to subscribe.
+ *
+ */
+CREATE TABLE pendingListSubscrs
+(
+	userID			userIdentifier	NOT NULL,
+	notifyID		userIdentifier	NOT NULL,
+	requestDate		VpTime		NOT NULL,
+	notifyPref	  	smallint	DEFAULT 0 NOT NULL,
+		CONSTRAINT uniqueNotify UNIQUE ( userID, notifyID )
+)
+GO

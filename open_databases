@@ -1,0 +1,247 @@
+#!/bin/sh
+
+# open_vpusers - Copyright (c) 1994 - 1997 Ubique Ltd.
+# This script retrieves and unpacks the Virtual Places (TM) Users Service
+
+# PLEASE MAKE SURE THAT THIS FILE IS EXECUTABLE
+# BY USING chmod +x AFTER YOU SAVE IT
+
+########################
+# GET INPUT PARAMETERS #
+########################
+if [ $# -lt 12 ]
+then
+  echo "usage: open_databases <ServicesRoot> <SybaseRoot> <DBAdminLogin> <DBAdminPasswd> <DataServer>"
+#  echo "                      <maxRegisteredUsers> <GMTdiff> <KeepOldData (Create/Delete/Keep)>"
+  echo "                      <GMTdiff> <KeepOldData (Create/Delete/Keep/Restore)>"
+  echo "                      <backupPlan (None/Full/Incremental)> <backupInterval (sec.)>"
+  echo "                      <backupDay> <backupTime> <backupCopiesToHold>"
+  exit
+fi
+
+ServicesRoot=$1
+shift
+SybaseRoot=$1
+shift
+DBAdminLogin=$1
+shift
+DBAdminPasswd=$1
+shift
+DataServer=$1
+shift
+GMTdiff=$1
+shift
+KeepOldData=$1
+shift
+backupPlan=$1
+shift
+backupInterval=$1
+shift
+fullBackupDay=$1
+shift
+backupTime=$1
+shift
+backupCopiesToHold=$1
+
+SYBASE=$SybaseRoot
+export SYBASE
+
+if [ $DBAdminLogin = "-" ]
+then
+  noAdmin=1
+else
+  noAdmin=0
+fi
+
+if [ $KeepOldData = "Create" ]
+then
+  KeepOldData="C"
+fi
+
+if [ $KeepOldData = "Delete" ]
+then
+  KeepOldData="D"
+fi
+
+if [ $KeepOldData = "Keep" ]
+then
+  KeepOldData="K"
+fi
+
+if [ $KeepOldData = "Restore" ]
+then
+  # restore mode - means databases are created but not filled with content
+  KeepOldData="R"
+fi
+
+###########################################
+# HARD-CODED VALUES - TO BE HANDLED LATER #
+###########################################
+# Device sizes - in megabytes
+blocksInMegabyte=500
+
+# give 3 MB space per registered user
+usersMeasureUnitSize=10000
+MegabytesPerUserUnit=3
+maxRegisteredUsers=100000
+
+# location of log threshold - means how low does the
+# space left in the log segment have to get for the 
+# threshold procedure to be activated - in megabytes
+UsersDbLogThresMegabytes=5
+UsersDbLogThres=`expr $UsersDbLogThresMegabytes \* $blocksInMegabyte`
+PlacesDbLogThresMegabytes=2
+PlacesDbLogThres=`expr $PlacesDbLogThresMegabytes \* $blocksInMegabyte`
+AudsetDbLogThresMegabytes=2
+AudsetDbLogThres=`expr $AudsetDbLogThresMegabytes \* $blocksInMegabyte`
+
+DBBackupType="disk"
+DBBackupDir=$SybaseRoot/db/backup
+DBBackupDev=""
+
+###########################
+# service specicific data #
+###########################
+# Users Service
+UsersDbName=vpusers
+UsersServiceRoot=$ServicesRoot/$UsersDbName
+VpUsersUser="vpusr"
+VpUsersPasswd="vpusr1"
+# Places Service
+PlacesDbName=vpplaces
+PlacesServiceRoot=$ServicesRoot/$PlacesDbName
+VpPlacesUser="vpplaces"
+VpPlacesPasswd="vpplaces"
+# Audset Service
+AudsetDbName=audset
+AudsetServiceRoot=$ServicesRoot/$AudsetDbName
+VpAudsetUser="audset"
+VpAudsetPasswd="audset1"
+
+###############################
+# SET THINGS UP AND SAY HELLO #
+###############################
+umask 022
+
+echo ""
+echo "Configuring Your Virtual Places Services Databases"
+echo ""
+Trace=trace
+
+cd $ServicesRoot
+
+  
+if [ $noAdmin -eq 0 ] && [ $backupPlan != "N" ]
+then
+  echo "Creating General Backup script"
+  echo
+  $ServicesRoot/install_allBackup $DBBackupType $DBBackupDir \
+      $SybaseRoot $ServicesRoot $DBAdminLogin $DBAdminPasswd $DataServer \
+      $backupPlan $backupInterval $fullBackupDay $backupTime $backupCopiesToHold
+fi
+
+#################################
+# GENERATE DATABASE(S)          # 
+#################################
+if [ $KeepOldData = "C" ] || [ $KeepOldData = "R" ]
+then
+  
+  if [ $noAdmin -eq 0 ]
+  then
+    
+    $ServicesRoot/create_logins $ServicesRoot $SybaseRoot $DBAdminLogin $DBAdminPasswd $DataServer
+    
+    $ServicesRoot/create_devices_script $SybaseRoot $ServicesRoot $DBAdminLogin $DBAdminPasswd $DataServer
+    $ServicesRoot/create_database_script $ServicesRoot $UsersDbName
+    $ServicesRoot/create_database_script $ServicesRoot $PlacesDbName
+    $ServicesRoot/create_database_script $ServicesRoot $AudsetDbName
+    
+    echo
+    echo "building devices ..."
+    echo $SybaseRoot/bin/isql -U$DBAdminLogin -P$DBAdminPasswd -S$DataServer -i $ServicesRoot/create_devices.sql
+    $SybaseRoot/bin/isql -U$DBAdminLogin -P$DBAdminPasswd -S$DataServer -i $ServicesRoot/create_devices.sql
+    
+    #echo
+    #echo "adding logins ..."
+    
+  fi
+fi
+
+if [ $KeepOldData = "D" ]
+then
+# drop the vp databases, then continue in create mode
+$SybaseRoot/bin/isql -U$DBAdminLogin -P$DBAdminPasswd -S$DataServer << !
+drop database audset
+drop database vpplaces
+drop database vpusers
+GO
+
+!
+# change KeepOldData to be "C" - continue in Create mode 
+KeepOldData=C
+fi
+
+#######################################
+# INCREMEMNTAL CHANGES IN DATABASE(S) # 
+#######################################
+if [ $KeepOldData = "K" ]
+then
+  # incremental changes
+  if [ $noAdmin -eq 0 ]
+  then
+    # create script for adding new device
+    $ServicesRoot/increment_devices $SybaseRoot $ServicesRoot $DBAdminLogin $DBAdminPasswd $DataServer
+    
+    # add new devices
+    echo
+    echo "building devices ..."
+    $SybaseRoot/bin/isql -U$DBAdminLogin -P$DBAdminPasswd -S$DataServer -i $ServicesRoot/create_db.sql
+  fi
+fi
+
+echo
+echo "building database ..."
+
+echo "Configuring Virtual Places Users Service in " $UsersServiceRoot
+echo
+$ServicesRoot/install_backup $UsersDbName $DBBackupType $DBBackupDir $ServicesRoot $SybaseRoot $UsersDbLogThres $noAdmin $KeepOldData $backupPlan
+$ServicesRoot/build_database $UsersDbName $ServicesRoot $SybaseRoot $DBAdminLogin $DBAdminPasswd $VpUsersUser $VpUsersPasswd $DataServer $KeepOldData
+  
+echo "Setting Time Zone to GMT + " $GMTdiff " Hours"
+$SybaseRoot/bin/isql -Uvpusr -Pvpusr1 -S$DataServer << !
+setConfigKey @keyName=diffFromGMT,@intVal=$GMTdiff
+GO
+
+!
+  
+echo "Configuring Virtual Places Places Service in " $PlacesServiceRoot
+echo
+$ServicesRoot/install_backup $PlacesDbName $DBBackupType $DBBackupDir $ServicesRoot $SybaseRoot $PlacesDbLogThres $noAdmin $KeepOldData $backupPlan
+$ServicesRoot/build_database $PlacesDbName $ServicesRoot $SybaseRoot $DBAdminLogin $DBAdminPasswd $VpPlacesUser $VpPlacesPasswd $DataServer $KeepOldData
+  
+echo "Configuring Virtual Places Audset Service in " $AudsetServiceRoot
+echo
+$ServicesRoot/install_backup $AudsetDbName $DBBackupType $DBBackupDir $ServicesRoot $SybaseRoot $AudsetDbLogThres $noAdmin $KeepOldData $backupPlan
+$ServicesRoot/build_database $AudsetDbName $ServicesRoot $SybaseRoot $DBAdminLogin $DBAdminPasswd $VpAudsetUser $VpAudsetPasswd $DataServer $KeepOldData
+  
+echo "Adding System Procedures..."
+echo
+$ServicesRoot/install_sysprocs $ServicesRoot $SybaseRoot $DBAdminLogin $DBAdminPasswd $DataServer
+
+if  [ $noAdmin -eq 0 ] && ( [ $KeepOldData = "C" ] || [ $KeepOldData = "R" ] ) && [ backupPlan != "N" ]
+then
+
+  # do a backup of the master DB
+  $ServicesRoot/backupMasterDB $SybaseRoot $DBAdminLogin $DBAdminPasswd $dataServer
+  
+  # manage backup copies that were created after databases creation
+  $ServicesRoot/manageBackupCopies $ServicesRoot
+fi
+
+if [ $noAdmin -eq 0 ] && [ backupPlan != "N" ]
+then
+  $ServicesRoot/runBackup $ServicesRoot
+fi
+
+echo 
+echo "Done."

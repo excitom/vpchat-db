@@ -1,0 +1,7 @@
+#!/bin/sh
+ 
+# This script does the remote load from one database to another
+ 
+/usr/local/bin/scp /excite/u/vplaces/s/sybase/db/backup/audset.full.backupSet0 vplaces@maverick:/excite/u/vplaces/s/sybase/db/backup/audset.full.backupSet0
+/usr/local/bin/scp /excite/u/vplaces/s/sybase/db/backup/vpplaces.full.backupSet0 vplaces@maverick:/excite/u/vplaces/s/sybase/db/backup/vpplaces.full.backupSet0
+/usr/local/bin/scp /excite/u/vplaces/s/sybase/db/backup/vpusers.full.backupSet0 vplaces@maverick:/excite/u/vplaces/s/sybase/db/backup/vpusers.full.backupSet0

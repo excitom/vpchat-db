@@ -1,0 +1,11 @@
+CREATE TABLE warnings
+(
+	warningID	warnID				IDENTITY
+                        constraint isPrimary primary key,
+	userID		userIdentifier			NOT NULL,
+	content	        longName			NOT NULL,
+	issuedOn	VpTime				NOT NULL,
+	issuedBy	userIdentifier			NOT NULL,
+	comment		longName			NULL
+)
+GO

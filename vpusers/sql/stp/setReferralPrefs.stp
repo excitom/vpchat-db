@@ -1,0 +1,119 @@
+/*
+ * Set referral program preference information for a user account.
+ * If no record existed one will be created. Otherwise the existing
+ * record is updated.
+ *
+ * OUTPUT : return value - 0 if successfull
+ *                         20001 if no matching registered user was found
+ */
+
+CREATE PROC setReferralPrefs
+(
+  @accountID		userIdentifier,
+  @type			tinyint,
+  @city			VARCHAR(50) = NULL,
+  @countrycode		CHAR(2) = NULL,
+  @name_first		VARCHAR(50) = NULL,
+  @name_last		VARCHAR(50) = NULL,
+  @postalcode		VARCHAR(20) = NULL,
+  @stateprov		VARCHAR(30) = NULL,
+  @phone_number		VARCHAR(16) = NULL,
+  @street_line1		VARCHAR(50) = NULL,
+  @street_line2		VARCHAR(50) = NULL
+)
+AS
+BEGIN
+  DECLARE @lastError int
+  DECLARE @diffFromGMT int
+  DECLARE @enrollDate	VpTime
+
+  BEGIN TRAN setReferralPrefs
+    
+    DECLARE @enrolled tinyint
+    SELECT @enrolled = enrolledReferrer
+       FROM userAccounts
+       WHERE accountID = @accountID
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN setReferralPrefs
+      RETURN @lastError
+    END
+
+    IF @enrolled = NULL
+    BEGIN
+      ROLLBACK TRAN setReferralPrefs
+      RETURN 20001
+    END
+
+    /*
+     * Make sure account record is marked as enrolled
+     */
+    IF @enrolled = 0
+    BEGIN
+      UPDATE userAccounts
+        SET enrolledReferrer = 1
+        WHERE accountID = @accountID
+
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN setReferralPrefs
+        RETURN @lastError
+      END
+    END
+
+    /*
+     * We should be able to rely on the 'enrolledReferrer' flag in the account
+     * record to determine if there is a referralPrefs record, but since the
+     * system has evolved and referralPrefs did not originally exist we'll
+     * explicitly check the table.
+     */
+    IF NOT EXISTS (SELECT * FROM referralPrefs WHERE accountID = @accountID)
+    BEGIN
+      SELECT @diffFromGMT = gmt
+        FROM getGMT
+      IF @diffFromGMT IS NULL
+        SELECT @diffFromGMT = 0
+
+      SELECT @enrollDate = dateadd( hour, (-1) * @diffFromGMT, getdate() )
+    
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN setReferralPrefs
+        RETURN @lastError
+      END
+
+      INSERT referralPrefs (accountID, enrollDate, type,
+			    city, countrycode, name_first, name_last,
+			    postalcode, stateprov, phone_number,
+			    street_line1, street_line2)
+     	 	    VALUES (@accountID, @enrollDate, @type,
+			    @city, @countrycode, @name_first, @name_last,
+			    @postalcode, @stateprov, @phone_number,
+			    @street_line1, @street_line2)
+    END
+    ELSE
+    BEGIN
+      UPDATE referralPrefs 
+        SET type= @type,
+	    city = @city, countrycode = @countrycode,
+            name_first = @name_first, name_last = @name_last,
+	    postalcode = @postalcode, stateprov = @stateprov,
+            phone_number = @phone_number,
+	    street_line1 = @street_line1, street_line2 = @street_line2
+        WHERE accountID = @accountID
+    END
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN setReferralPrefs
+      RETURN @lastError
+    END
+    
+  COMMIT TRAN setReferralPrefs
+END
+GO

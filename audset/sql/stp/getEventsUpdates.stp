@@ -1,0 +1,34 @@
+/* get update notifications for latest 
+   editing changes done on events */
+/* input:  NONE
+   output: list of event changes, stating -
+   event id, field id
+*/
+CREATE PROC getEventsUpdates
+AS
+BEGIN
+  DECLARE @lastError int
+  BEGIN TRAN getEventsUpdates
+    SELECT eventID, fieldID
+      FROM eventChanges
+      ORDER BY eventID
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+    
+    DELETE FROM eventChanges
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+    
+  COMMIT TRAN getEventsUpdates
+END
+GO

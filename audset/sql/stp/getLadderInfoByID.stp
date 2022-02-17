@@ -1,0 +1,83 @@
+/*
+ * Return a information about a game ladder
+ *
+ */
+IF EXISTS
+ (SELECT name FROM sysobjects WHERE name='getLadderInfoByID' AND type = 'P')
+  DROP PROC getLadderInfoByID
+GO
+CREATE PROC getLadderInfoByID (
+	@notifyID	userIdentifier
+)
+AS
+BEGIN
+  DECLARE @ladderName   longName
+  DECLARE @subheader    longName
+  DECLARE @gameName     longName
+  DECLARE @URL          longName
+  DECLARE @imageURL     longName
+  DECLARE @gameTypeID   int
+  DECLARE @unlisted     bit
+  DECLARE @approvalRqd  bit
+  DECLARE @adultContent bit
+  DECLARE @closed       bit
+  DECLARE @createdDate  VpTime
+  DECLARE @scoreFmt	tinyint
+
+  IF EXISTS( SELECT * FROM ladders WHERE notifyID = @notifyID)
+  BEGIN
+    SELECT @ladderName   = ladderName,
+	   @subheader    = subheader,
+	   @gameName     = gameName, 		-- both name and ID are
+	   @gameTypeID   = l.gameTypeID, 	-- useful in different contexts
+      	   @URL          = URL,
+	   @imageURL     = imageURL,
+	   @unlisted     = unlisted,
+	   @approvalRqd  = approvalRqd,
+	   @adultContent = adultContent,
+	   @closed       = closed,
+      	   @createdDate  = createdDate,
+           @scoreFmt     = scoreFmt
+      FROM notifyLists n, privateLists p, ladders l, gameTypes g
+      WHERE n.notifyID = @notifyID
+      AND   n.notifyID = p.notifyID
+      AND   n.notifyID = l.notifyID
+      AND   l.gameTypeID = g.gameTypeID
+
+    DECLARE @nickName VPuserID
+    SELECT @nickName = nickName
+      FROM vpusers..users u, vpusers..registration r,
+	vpusers..userAccounts a, vpusers..services s
+      WHERE s.itemID = @notifyID
+      AND   s.type = 6
+      AND   s.accountID = a.accountID
+      AND   a.ownerID = u.userID
+      AND   registrationMode = 2
+
+    DECLARE @members int
+    SELECT @members = COUNT(userID)
+      FROM ladderMembers
+      WHERE notifyID = @notifyID
+      AND pending = 0
+
+    DECLARE @pending int
+    SELECT @pending = COUNT(userID)
+      FROM ladderMembers
+      WHERE notifyID = @notifyID
+      AND pending = 1
+
+    SELECT @notifyID AS notifyID,
+	@ladderName AS ladderName, @subheader AS subheader,
+	@gameName AS gameName, @URL AS URL, @imageURL AS imageURL,
+	@unlisted AS unlisted, @approvalRqd AS approvalRqd,
+	@adultContent AS adultContent, @closed AS closed,
+	@createdDate AS createdDate, @nickName AS ownerName,
+	@members AS members, @pending AS pending, @gameTypeID AS gameTypeID,
+        @scoreFmt AS scoreFmt
+  END
+  ELSE BEGIN
+    RETURN 20000
+  END
+
+END
+GO

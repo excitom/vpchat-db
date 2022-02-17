@@ -1,0 +1,53 @@
+/* 
+ * Get configuration related to the servers. This is intended
+ * for the WebSQL code.
+ *
+ */
+CREATE PROC getServerConfig
+AS
+BEGIN
+  DECLARE @lastError int
+  DECLARE @usersSvc serviceID
+  SELECT  @usersSvc = 289
+  DECLARE @srvrCfg serviceID
+  SELECT  @srvrCfg = 339
+  BEGIN TRAN
+    SELECT keyName, intValue
+      FROM configurationKeys
+      WHERE (belongsTo = @usersSvc OR belongsTo = @srvrCfg)
+            AND type = 1
+      ORDER BY keyName
+    SELECT @lastError = @@error
+    IF @lastError !=0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+    
+    SELECT keyName, strValue
+      FROM configurationKeys
+      WHERE (belongsTo = @usersSvc OR belongsTo = @srvrCfg)
+            AND type = 2
+      ORDER BY keyName
+    SELECT @lastError = @@error
+    IF @lastError !=0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+    
+    SELECT keyName, intValue
+      FROM configurationKeys
+      WHERE (belongsTo = @usersSvc OR belongsTo = @srvrCfg)
+            AND type = 3
+      ORDER BY keyName
+    SELECT @lastError = @@error
+    IF @lastError !=0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+    
+  COMMIT TRAN
+END
+GO

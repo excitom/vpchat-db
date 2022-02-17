@@ -1,0 +1,13 @@
+/* get list of votes for a given event  */
+/* input:  event ID
+   output: list of votes, stating for each - 
+           id, title, status
+*/
+CREATE PROC getEventVotesList(
+        @eventID 	eventIdentifier
+)
+AS
+  SELECT voteID, title, status
+    FROM eventVotes
+    WHERE eventID = @eventID
+GO

@@ -1,0 +1,18 @@
+CREATE TABLE auditoriums
+(
+	auditoriumID	numeric(6,0)			IDENTITY
+                        constraint isPrimary primary key,
+	name  		varchar(16)			NOT NULL, /* unique key */
+	background	varchar(255)			NOT NULL,
+	title		varchar(255)			NOT NULL,
+	welcomeMsg1	varchar(255)			NULL,
+	welcomeMsg2	varchar(255)			NULL,
+	welcomeImage	image				NULL,
+	inPlacesList	bit		DEFAULT 1	NOT NULL,
+	stageCapacity	integer				NOT NULL,
+	rowSize		integer				NOT NULL,
+	numberOfRows	integer				NOT NULL,
+	rowNamePrefix	varchar(10)	DEFAULT "Row "	NOT NULL,
+	client		varchar(16)			NULL
+)
+GO

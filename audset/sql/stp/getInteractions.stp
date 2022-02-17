@@ -1,0 +1,298 @@
+/* getInteractions - returns a list of up to 100 interactions for the 
+                     requested event, of the requested type. 
+   Inputs - eventId: id of the event for which to get interactions
+            host name: name of host which is getting interactions
+            interactionType: list of interactions types to get
+            fetchType: one of "NEW"    - to get interactions which status is "IDLE" or "LOCKED" by the host
+                              "MINE"   - to get interactions which status is "READY" or 
+                                         "FORWARDED", with my name on them,
+                              "LOCKED" - to get interactions which status is "LOCKED"
+                                         by the host - for refreshes of tables.
+            orderBy: "InteractionType", "Category", "SenderName", "None"
+   Output - a list of interactions with the following fields: interaction Id, interaction name,
+            sender, text, category, status
+   Processing - scans the interactions table, and returns the requested interactions. If NEW 
+                interactions are requested, all interactions fetched are 
+                set to LOCKED by the host. 
+   Returns - 20001 - if too many interaction types were given
+*/
+CREATE PROC getInteractions (
+              @eventID	 eventIdentifier,
+              @hostName  VPuserID,
+              @interactionTypes longName,
+              @fetchType varchar(10), 
+              @orderBy varchar(20)
+       )
+AS
+BEGIN
+
+DECLARE @lastError integer
+
+/* Get Interaction Types requested ... */
+/* ------------------------------------*/
+DECLARE @iType    integer
+DECLARE @iType1   integer
+DECLARE @iType2   integer 
+DECLARE @iType3   integer 
+DECLARE @iType4   integer 
+DECLARE @iType5   integer 
+DECLARE @iType6   integer 
+DECLARE @counter  integer
+DECLARE @commaPos integer
+DECLARE @IName    varchar(16)
+DECLARE @fetchedCounter integer
+DECLARE @locked   integer
+DECLARE @idle     integer
+DECLARE @ready    integer
+DECLARE @forwarded integer
+DECLARE @status   integer
+
+/* Parse list of interaction types */
+/* --------------------------------*/
+SELECT @counter = 1
+WHILE ( ascii( rtrim(ltrim(@interactionTypes))) > 32 )
+BEGIN
+  SELECT @commaPos = patindex( "%,%", @interactionTypes )
+  IF @commaPos = 0 BEGIN
+    /* Last Interaction Type in list */
+    SELECT @IName = rtrim(ltrim(@interactionTypes))
+    SELECT @interactionTypes = ""
+  END
+  ELSE BEGIN
+    SELECT @IName = rtrim( ltrim( substring( @interactionTypes, 1, @commaPos-1)) )
+    SELECT @interactionTypes = substring( @interactionTypes, 
+                                          @commaPos+1, 
+                                          char_length( @interactionTypes ) - @commaPos )
+  END
+
+  /* Get the Interaction Type for the current Interaction Name */
+  SELECT @iType = interactionType
+  FROM interactionsAllowed
+  WHERE eventID = @eventID AND
+        name = @IName
+  SELECT @lastError = @@error
+  IF @lastError != 0
+    RETURN @lastError
+  
+  IF @counter = 1 
+     SELECT @iType1 = @iType
+  ELSE IF @counter = 2 
+     SELECT @iType2 = @iType
+  ELSE IF @counter = 3 
+     SELECT @iType3 = @iType
+  ELSE IF @counter = 4 
+     SELECT @iType4 = @iType
+  ELSE IF @counter = 5 
+     SELECT @iType5 = @iType
+  ELSE IF @counter = 6 
+     SELECT @iType6 = @iType
+  ELSE 
+    RETURN 20001 /* Too many Interaction Types */
+
+  SELECT @counter = @counter + 1
+
+END /* of while */
+
+/* Set zero in unused iTypes variables */
+WHILE @counter <= 6
+BEGIN
+  IF @counter = 1 
+     SELECT @iType1 = 0
+   ELSE IF @counter = 2 
+     SELECT @iType2 = 0
+  ELSE IF @counter = 3 
+     SELECT @iType3 = 0
+  ELSE IF @counter = 4 
+     SELECT @iType4 = 0
+  ELSE IF @counter = 5 
+     SELECT @iType5 = 0
+  ELSE IF @counter = 6 
+     SELECT @iType6 = 0
+  SELECT @counter = @counter + 1
+END
+ 
+  
+/* Get interaction status values */ 
+SELECT @locked = statusID 
+FROM interactionStatus
+WHERE name = "LOCKED"
+SELECT @lastError = @@error
+IF @lastError != 0
+  RETURN @lastError
+
+SELECT @idle = statusID  
+FROM interactionStatus
+WHERE name = "IDLE"
+SELECT @lastError = @@error
+IF @lastError != 0
+  RETURN @lastError
+
+SELECT @ready = statusID
+FROM interactionStatus
+WHERE name = "READY"
+SELECT @lastError = @@error
+IF @lastError != 0
+  RETURN @lastError
+  
+SELECT @forwarded = statusID  
+FROM interactionStatus
+WHERE name = "FORWARDED"
+SELECT @lastError = @@error
+IF @lastError != 0
+  RETURN @lastError
+ 
+BEGIN TRAN
+
+/* Get New interactions */
+/* ---------------------*/
+IF @fetchType = "NEW" 
+BEGIN
+  /* Unlock any interactions which has been locked previously by this host */
+  UPDATE eventInteractions
+    SET status = @idle 
+    FROM eventInteractions
+    ( INDEX interactionsByStatusIdx )
+    WHERE status = @locked AND hostName = @hostName
+  SELECT @lastError = @@error
+  IF @lastError != 0
+  BEGIN
+    ROLLBACK TRAN
+    RETURN @lastError
+  END
+
+  /* Mark the first 100 interactions as locked by this user */
+  SET ROWCOUNT 100
+  UPDATE eventInteractions
+    SET status = @locked, hostName = @hostName
+    WHERE interactionID IN 
+          (SELECT interactionID
+           FROM eventInteractions ( INDEX interactionsByEventIdx ), interactionsAllowed
+           WHERE interactionsAllowed.eventID = @eventID AND
+                 eventInteractions.eventID = @eventID AND
+                 interactionsAllowed.interactionType = eventInteractions.interactionType AND
+                 eventInteractions.status = @idle AND 
+                 eventInteractions.interactionType in (@iType1, @iType2, @iType3, @iType4, @iType5, @iType6)
+          ) 
+  SELECT @lastError = @@error
+  IF @lastError != 0
+  BEGIN
+    ROLLBACK TRAN
+    RETURN @lastError
+  END
+
+  /*Now select the locked interactions */
+  SELECT @fetchType = "LOCKED"
+END
+
+/* Get My interactions */
+/* ---------------------*/
+IF @fetchType = "MINE" 
+BEGIN
+
+  IF @orderBy = "InteractionType"
+    SELECT interactionID, name, senderName, text, category, status
+    FROM eventInteractions ( INDEX interactionsByEventIdx ), interactionsAllowed
+    WHERE interactionsAllowed.eventID = @eventID AND
+        eventInteractions.eventID = @eventID AND
+        interactionsAllowed.interactionType = eventInteractions.interactionType AND
+        eventInteractions.status in (@ready, @forwarded) AND
+        eventInteractions.hostName = @hostName AND  
+        eventInteractions.interactionType in (@iType1, @iType2, @iType3, @iType4, @iType5, @iType6)
+    ORDER BY name
+  ELSE  IF @orderBy = "Category"
+    SELECT interactionID, name, senderName, text, category, status
+    FROM eventInteractions ( INDEX interactionsByEventIdx ), interactionsAllowed
+    WHERE interactionsAllowed.eventID = @eventID AND
+        eventInteractions.eventID = @eventID AND
+        interactionsAllowed.interactionType = eventInteractions.interactionType AND
+        eventInteractions.status in (@ready, @forwarded) AND
+        eventInteractions.hostName = @hostName AND  
+        eventInteractions.interactionType in (@iType1, @iType2, @iType3, @iType4, @iType5, @iType6)
+    ORDER BY category
+  ELSE IF @orderBy = "SenderName"
+    SELECT interactionID, name, senderName, text, category, status
+    FROM eventInteractions ( INDEX interactionsByEventIdx ), interactionsAllowed
+    WHERE interactionsAllowed.eventID = @eventID AND
+        eventInteractions.eventID = @eventID AND
+        interactionsAllowed.interactionType = eventInteractions.interactionType AND
+        eventInteractions.status in (@ready, @forwarded) AND
+        eventInteractions.hostName = @hostName AND  
+        eventInteractions.interactionType in (@iType1, @iType2, @iType3, @iType4, @iType5, @iType6)
+    ORDER BY senderName
+  ELSE /* No sort */
+    SELECT interactionID, name, senderName, text, category, status
+    FROM eventInteractions ( INDEX interactionsByEventIdx ), interactionsAllowed
+    WHERE interactionsAllowed.eventID = @eventID AND
+        eventInteractions.eventID = @eventID AND
+        interactionsAllowed.interactionType = eventInteractions.interactionType AND
+        eventInteractions.status in (@ready, @forwarded) AND
+        eventInteractions.hostName = @hostName AND  
+        eventInteractions.interactionType in (@iType1, @iType2, @iType3, @iType4, @iType5, @iType6)
+ 
+  SELECT @lastError = @@error
+  IF @lastError != 0
+  BEGIN
+    ROLLBACK TRAN
+    RETURN @lastError
+  END
+  
+END
+
+/* Get interactions locked by me */
+/* ------------------------------*/
+IF @fetchType = "LOCKED" 
+BEGIN
+
+  IF @orderBy = "InteractionType"
+    SELECT interactionID, name, senderName, text, category, status
+    FROM eventInteractions ( INDEX interactionsByEventIdx ), interactionsAllowed
+    WHERE interactionsAllowed.eventID = @eventID AND
+        eventInteractions.eventID = @eventID AND
+        interactionsAllowed.interactionType = eventInteractions.interactionType AND
+        eventInteractions.status = @locked AND
+        eventInteractions.hostName = @hostName AND  
+        eventInteractions.interactionType in (@iType1, @iType2, @iType3, @iType4, @iType5, @iType6)
+    ORDER BY name
+  ELSE   IF @orderBy = "Category"
+    SELECT interactionID, name, senderName, text, category, status
+    FROM eventInteractions ( INDEX interactionsByEventIdx ), interactionsAllowed
+    WHERE interactionsAllowed.eventID = @eventID AND
+        eventInteractions.eventID = @eventID AND
+        interactionsAllowed.interactionType = eventInteractions.interactionType AND
+        eventInteractions.status = @locked AND
+        eventInteractions.hostName = @hostName AND  
+        eventInteractions.interactionType in (@iType1, @iType2, @iType3, @iType4, @iType5, @iType6)
+    ORDER BY category
+  ELSE   IF @orderBy = "SenderName"
+    SELECT interactionID, name, senderName, text, category, status
+    FROM eventInteractions ( INDEX interactionsByEventIdx ), interactionsAllowed
+    WHERE interactionsAllowed.eventID = @eventID AND
+        eventInteractions.eventID = @eventID AND
+        interactionsAllowed.interactionType = eventInteractions.interactionType AND
+        eventInteractions.status = @locked AND
+        eventInteractions.hostName = @hostName AND  
+        eventInteractions.interactionType in (@iType1, @iType2, @iType3, @iType4, @iType5, @iType6)
+    ORDER BY senderName
+  ELSE /*No sort */
+    SELECT interactionID, name, senderName, text, category, status
+    FROM eventInteractions ( INDEX interactionsByEventIdx ), interactionsAllowed
+    WHERE interactionsAllowed.eventID = @eventID AND
+        eventInteractions.eventID = @eventID AND
+        interactionsAllowed.interactionType = eventInteractions.interactionType AND
+        eventInteractions.status = @locked AND
+        eventInteractions.hostName = @hostName AND  
+        eventInteractions.interactionType in (@iType1, @iType2, @iType3, @iType4, @iType5, @iType6)
+
+  SELECT @lastError = @@error
+  IF @lastError != 0
+  BEGIN
+    ROLLBACK TRAN
+    RETURN @lastError
+  END
+  
+END
+
+COMMIT TRAN
+
+END
+GO

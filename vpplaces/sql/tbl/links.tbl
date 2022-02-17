@@ -1,0 +1,14 @@
+/*
+ * When a dynamic page is rendered, this table is consulted to
+ * generate web page links.
+ */
+CREATE TABLE links
+(
+	category	categoryIdentifier	NOT NULL,
+	title		VARCHAR(255)		NOT NULL,
+	URL		VARCHAR(255)		NOT NULL,
+	linkOrder	tinyint			NOT NULL,
+	popup		bit,
+	breakAfter	bit
+)
+GO

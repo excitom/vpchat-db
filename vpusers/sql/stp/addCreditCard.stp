@@ -1,0 +1,166 @@
+/* add or update credit card information
+   input:  fields from the Ecom form
+
+   flag: 1 = override current information for the same card number
+
+   The accountID parameter is used to make a history record, tieing this
+   credit card to an account for future reference, but the accountID is
+   not part of the cc record since the card may be shared among multiple
+   accounts.
+
+   output: Return value - 0 - success 
+		 	  20000 - Duplicate card, override=false
+			  20001 - card is on the bad credit list
+
+	The ccID number is written to output.
+*/
+CREATE PROC addCreditCard ( 
+	@Ecom_online_email	VARCHAR(75),
+	@Ecom_city		VARCHAR(50),
+	@Ecom_countrycode	CHAR(2),
+	@Ecom_name_first	VARCHAR(50),
+	@Ecom_name_last		VARCHAR(50),
+	@Ecom_postalcode	VARCHAR(20),
+	@Ecom_stateprov		VARCHAR(30),
+	@Ecom_street_line1	VARCHAR(50),
+	@Ecom_phone_number	VARCHAR(16),
+	@Ecom_card_expdate_month	tinyint,
+	@Ecom_card_expdate_year	smallint,
+	@Ecom_card_name		VARCHAR(50),
+	@Ecom_card_number	VARCHAR(19),
+	@Ecom_card_verification	CHAR(4),
+	@IOC_buyer_type		CHAR(1),
+	@IOC_CVV_indicator	tinyint,
+        @update			bit = FALSE,
+	@accountID		userIdentifier = 0
+)
+AS
+BEGIN
+  DECLARE @ccID 		userIdentifier
+  DECLARE @lastError		int
+
+  BEGIN TRAN
+    
+    SELECT  @ccID = ccID
+      FROM creditCards
+      WHERE Ecom_card_number = @Ecom_card_number
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    /* this is a new card number */
+    IF @ccID = NULL
+    BEGIN
+      INSERT INTO creditCards (
+	Ecom_billto_online_email,
+	Ecom_billto_city,
+	Ecom_billto_countrycode,
+	Ecom_billto_name_first,
+	Ecom_billto_name_last,
+	Ecom_billto_postalcode,
+	Ecom_billto_stateprov,
+	Ecom_billto_street_line1,
+	Ecom_billto_phone_number,
+	Ecom_card_expdate_month,
+	Ecom_card_expdate_year,
+	Ecom_card_name,
+	Ecom_card_number,
+	Ecom_card_verification,
+	IOC_buyer_type,
+	IOC_CVV_indicator
+      )
+      VALUES (
+	@Ecom_online_email,
+	@Ecom_city,
+	@Ecom_countrycode,
+	@Ecom_name_first,
+	@Ecom_name_last,
+	@Ecom_postalcode,
+	@Ecom_stateprov,
+	@Ecom_street_line1,
+	@Ecom_phone_number,
+	@Ecom_card_expdate_month,
+	@Ecom_card_expdate_year,
+	@Ecom_card_name,
+	@Ecom_card_number,
+	@Ecom_card_verification,
+	@IOC_buyer_type,
+	@IOC_CVV_indicator
+      )
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+
+      /* get the new ccID */
+      SELECT @ccID = @@identity
+
+      COMMIT TRAN
+
+      /* add a history record */
+      EXEC addAcctHistory @accountID, 36, @ccID
+      
+    END
+    /* duplicate card number */
+    ELSE
+    BEGIN
+      /* check if this card is in the bad credit list */
+      IF EXISTS (SELECT * FROM badCredit WHERE ccID = @ccID AND type = 2)
+      BEGIN
+        ROLLBACK TRAN
+        SELECT @ccID
+        RETURN 20001
+      END
+      /* overwrite fields if the Update flag is TRUE */
+      IF @update = 1
+      BEGIN
+        UPDATE creditCards
+          SET
+	    Ecom_billto_online_email = @Ecom_online_email,
+	    Ecom_billto_city         = @Ecom_city,
+	    Ecom_billto_countrycode  = @Ecom_countrycode,
+	    Ecom_billto_name_first   = @Ecom_name_first,
+	    Ecom_billto_name_last    = @Ecom_name_last,
+	    Ecom_billto_postalcode   = @Ecom_postalcode,
+	    Ecom_billto_stateprov    = @Ecom_stateprov,
+	    Ecom_billto_street_line1 = @Ecom_street_line1,
+	    Ecom_billto_phone_number = @Ecom_phone_number,
+	    Ecom_card_expdate_month  = @Ecom_card_expdate_month,
+	    Ecom_card_expdate_year   = @Ecom_card_expdate_year,
+	    Ecom_card_name           = @Ecom_card_name,
+	    Ecom_card_verification   = @Ecom_card_verification,
+	    IOC_buyer_type           = @IOC_buyer_type,
+	    IOC_CVV_indicator        = @IOC_CVV_indicator
+          WHERE ccID = @ccID
+
+        SELECT @lastError = @@error
+        IF @lastError != 0
+        BEGIN
+          ROLLBACK TRAN
+          RETURN @lastError
+        END
+
+        COMMIT TRAN
+
+        /* add a history record */
+        EXEC addAcctHistory @accountID, 38, @ccID
+
+      END
+      /* duplicate card and update=false */
+      ELSE
+      BEGIN
+        ROLLBACK TRAN
+        RETURN 20000
+      END
+    END
+
+  SELECT @ccID AS ccID
+  RETURN 0
+END
+GO

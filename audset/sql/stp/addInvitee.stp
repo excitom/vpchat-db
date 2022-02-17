@@ -1,0 +1,104 @@
+/* Adds an invited guest to the invitees table */
+/* input:  eventId, invited guest name, registration mode 
+   output: returns 20001 - if registration mode not 2(local) or 3(aol),
+                   20002 - if user not registered locally when local registration is used
+                           or if aux. registration is not allowed but aux. reg. mode was specified
+                   20003 - if user already invited for that event
+   18/6/97: Fix -- no check is made that the guest is registered.
+   19/8/97 Yaron : Fix - check of user reg. mode is done so aux. user is
+                         added to database with aux. reg mode if aux DB is allowed
+                   Fix - put inside transaction, added more error handling
+*/
+CREATE PROC addInvitee
+(
+  @eventID		eventIdentifier,
+  @name             	VPuserID,
+  @regMode		VpRegMode
+)
+AS
+BEGIN
+  DECLARE @lastError   int
+  DECLARE @retVal int
+  DECLARE @isRegistered int
+  DECLARE @nameExists  VPuserID
+  DECLARE @auxDbAllowed bit
+
+  IF @regMode != 2 AND @regMode != 3 
+    RETURN 20001	
+
+  BEGIN TRAN addInvitee
+    SELECT @auxDbAllowed = intValue
+      FROM vpusers..configurationKeys
+      WHERE ( keyName = "auxDbAllowed" )
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN addInvitee
+      RETURN @lastError
+    END
+    
+    /* check if the user is registered in the given registration mode */
+      
+    EXEC @retVal = vpusers..isRegistered @name, @regMode, @isRegistered output
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN addInvitee
+      RETURN @lastError
+    END
+    
+    IF @retVal != 0
+    BEGIN
+      ROLLBACK TRAN addInvitee
+      RETURN @retVal
+    END
+    
+    IF ( @isRegistered = 0 ) AND
+       ( @auxDbAllowed = 0 )
+    BEGIN
+      /* assumption - the reg.mode that is passed is ALWAYS 2 = local */
+      /* if user is not registered and local reg.mode is used,
+         and aux. registration is not allowed,
+         return with error code 20002 
+         Note - when aux. registration IS allowed, we accept even if the
+                the user is not registered */
+      ROLLBACK TRAN addInvitee
+      RETURN 20002
+    END
+    
+    SELECT @nameExists = inviteeName 
+      FROM eventInvitees
+      WHERE inviteeName = @name AND
+            eventID = @eventID
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN addInvitee
+      RETURN @lastError
+    END
+    
+    IF @nameExists = @name
+    BEGIN
+      ROLLBACK TRAN addInvitee
+      RETURN 20003
+    END
+    
+    /* Add this event invited guest to the table */
+    INSERT INTO eventInvitees 
+        ( eventID, inviteeName, regMode)
+      VALUES ( @eventID, @name, @regMode )
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN addInvitee
+      RETURN @lastError
+    END
+    
+  COMMIT TRAN addInvitee
+    
+END
+GO

@@ -1,0 +1,13 @@
+/* get welcome message, title and stage URL for a specific auditorium */
+/* input:  auditorium id
+   output: welcome message, title and stage URL
+*/
+CREATE PROC getAuditoriumInfo ( @auditoriumID numeric(6,0) )
+AS
+BEGIN
+  SELECT welcomeMsg1, welcomeMsg2, 
+         title, background
+    FROM auditoriums
+    WHERE auditoriumID = @auditoriumID
+END
+GO

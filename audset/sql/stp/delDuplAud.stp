@@ -1,0 +1,26 @@
+/* Delete a duplicate auditorium -
+   related data will be deleted through the 
+   delAuditoriumData trigger. 
+   Used by audset after canonicalization of the URL.. if the URL
+   is already used, the auditorium is deleted.
+*/
+/* input:  auditorium id
+   output: None
+*/
+CREATE PROC delDuplAud ( @audID numeric(6,0) )
+AS
+BEGIN
+  DECLARE @lastError int 
+  BEGIN TRAN
+    DELETE auditoriums
+      WHERE auditoriumID = @audID
+    SELECT @lastError = @@error
+    IF @lastError != 0 
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+  COMMIT TRAN
+  
+END
+GO

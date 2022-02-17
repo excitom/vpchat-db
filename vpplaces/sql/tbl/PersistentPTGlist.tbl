@@ -1,0 +1,13 @@
+CREATE TABLE PersistentPTGlist
+(
+	serialNumber	integer				NOT NULL,
+	URL		varchar(255)			NOT NULL,
+	title		varchar(255)			NOT NULL,
+        type            integer                         NOT NULL,
+	roomUsage	integer,
+	corrUsage	integer,
+
+	UNIQUE (serialNumber,type)
+
+)
+GO

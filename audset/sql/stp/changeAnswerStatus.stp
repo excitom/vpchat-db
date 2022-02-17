@@ -1,0 +1,134 @@
+/* Change the current status of a set of guest answers and associated interactions */
+/* input:  interactions list - ids separated by commas,
+           new status - id for status "DELETED" or "BROADCASTED"
+           host name - name of host 
+   output: If the new status is BROADCASTED, then the interactions/answers 
+           for which the status is been changed are returned with the following columns:
+           interaction type, sender name, interaction text, guest name, answer text.
+           Returns 20001 if the new status is not DELETED or BROADCASTED,
+           0 otherwise.
+*/
+CREATE PROC changeAnswerStatus( 
+               @interactions  longName,
+               @newStatus     numeric(2,0) ,
+               @hostName      VPuserID      )
+AS
+BEGIN
+  DECLARE @newStatusName varchar(16)
+  DECLARE @lastError   integer
+  DECLARE @id varchar(15)
+  DECLARE @commaPos integer
+  DECLARE @broadcasted integer
+  DECLARE @saveInter integer
+  DECLARE @iType varchar(16)
+  DECLARE @sender VPuserID
+  DECLARE @iText longName
+  DECLARE @guest VPuserID
+  DECLARE @answer longName
+
+  SELECT @newStatusName = name
+  FROM interactionStatus
+  WHERE statusID = @newStatus
+  SELECT @lastError = @@error
+  IF @lastError != 0
+  BEGIN
+    RAISERROR @lastError
+    RETURN @lastError
+  END
+
+  IF @newStatusName != "DELETED" AND @newStatusName != "BROADCASTED"
+    RETURN 20001
+ 
+  CREATE TABLE #answers ( id numeric(10,0), itype varchar(16), 
+                          sender varchar(20), text varchar(255), guest varchar(20), answer varchar(255) )
+ 
+  SELECT @broadcasted = statusID 
+    FROM interactionStatus
+    WHERE name = "BROADCASTED"
+  SELECT @lastError = @@error
+  IF @lastError != 0
+     RETURN @lastError
+
+  IF  (@newStatus = @broadcasted)
+    SELECT @saveInter = 1
+  ELSE
+    SELECT @saveInter = 0
+     
+  BEGIN TRAN changeStatus
+  /* parse list of interaction ids */
+  WHILE ( ascii( rtrim(ltrim(@interactions ))) > 32 ) BEGIN
+    SELECT @commaPos = patindex( "%,%", @interactions )
+    IF @commaPos = 0 BEGIN
+      SELECT @id = rtrim(ltrim(@interactions))
+      SELECT @interactions = ""
+    END
+    ELSE BEGIN
+      SELECT @id = rtrim( ltrim( substring( @interactions, 1, @commaPos-1 ) ) )
+      SELECT @interactions = substring( @interactions, @commaPos+1, 
+                                        char_length( @interactions ) - @commaPos )
+    END
+  
+    UPDATE eventInteractions 
+    SET status = @newStatus, hostName = @hostName
+    FROM eventInteractions ( INDEX isPrimary )
+    WHERE interactionID = convert(numeric(10,0),@id)  
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN changeStatus
+      RETURN @lastError
+    END
+
+    UPDATE answers
+    SET status = @newStatus, hostName = @hostName
+    WHERE interactionID = convert(numeric(10,0),@id) 
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN changeStatus
+      RETURN @lastError
+    END
+
+    /* Status is Broadcast, save the interaction/answer in a temporary table */
+    IF @saveInter = 1 
+    BEGIN 
+      SELECT @iType = name, @sender = eventInteractions.senderName, @iText = eventInteractions.text, 
+             @guest = answers.senderName, @answer = answers.text 
+      FROM eventInteractions ( INDEX isPrimary ), interactionsAllowed, answers
+      WHERE eventInteractions.interactionID = convert(numeric(10,0),@id) AND
+            answers.interactionID = convert(numeric(10,0),@id) AND
+            interactionsAllowed.eventID = eventInteractions.eventID AND
+            interactionsAllowed.interactionType = eventInteractions.interactionType 
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+  
+      INSERT #answers 
+       ( id, itype, sender, text, guest, answer)
+      VALUES ( convert(numeric(10,0),@id) , @iType, @sender, @iText, @guest, @answer)
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+    END
+
+  END /* of while */
+
+  IF @saveInter = 1
+  BEGIN
+    SELECT * FROM #answers
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+  END
+  
+  COMMIT TRAN changeStatus
+END
+GO

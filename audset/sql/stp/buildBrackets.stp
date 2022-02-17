@@ -1,0 +1,656 @@
+/*
+ * This is common code for building tournament brackets, called when
+ * a tournament is created or when it's size is changed.
+ *
+ * Tom Lang 1/2005
+ */
+IF EXISTS(SELECT name FROM sysobjects WHERE name='buildBrackets' AND type='P')
+ DROP PROC buildBrackets
+GO
+CREATE PROC buildBrackets (
+  @tournID	userIdentifier,
+  @type		tinyint,
+  @players	integer
+)
+AS
+BEGIN
+  DECLARE @lastError	integer
+  DECLARE @rounds	integer
+  DECLARE @nextRound	tinyint
+  DECLARE @gameNum	smallint
+  DECLARE @seed		smallint
+  DECLARE @round	tinyint
+  DECLARE @slot		integer
+  DECLARE @order	integer
+  DECLARE @i		integer
+  DECLARE @j		integer
+  DECLARE @pp		integer
+  DECLARE @odd		integer
+  DECLARE @tmp		integer
+
+  /* 
+   * create arrays which will be used when setting up the brackets
+   */
+  CREATE TABLE #order (slot int, player int)
+  CREATE TABLE #newOrder (slot int, player int)
+  CREATE TABLE #games (slot int, player1 int, player2 int)
+  CREATE TABLE #pairs (player1 int, player2 int)
+  CREATE TABLE #prevPairs (player1 int, player2 int)
+
+  BEGIN TRAN
+
+    /* Round Robin or Swiss style */
+
+    IF @type = 4 OR @type = 8
+    BEGIN
+      /* 
+       * Determine number of rounds
+       */
+      SELECT @rounds = @players - 1
+
+      /* Determine unique combinations */
+
+      SELECT @i = 1
+      WHILE (@i < @players)
+      BEGIN
+        SELECT @j = @i + 1
+        WHILE (@j <= @players)
+        BEGIN
+          INSERT #pairs (player1, player2) VALUES (@i, @j)
+          SELECT @j = @j + 1
+        END
+        SELECT @i = @i + 1
+      END
+
+      SELECT @round = 1
+      WHILE (@round < @players)
+      BEGIN
+-- select 'round', @round
+        SELECT @slot = 1
+        WHILE (@slot <= (@players/2))
+        BEGIN
+          SELECT @i = player1, @j = player2
+            FROM #pairs
+            WHERE player1 NOT IN
+              (SELECT seed FROM brackets
+                 WHERE tournID = @tournID
+                 AND round = @round)
+            AND player2 NOT IN
+              (SELECT seed FROM brackets
+                 WHERE tournID = @tournID
+                 AND round = @round)
+
+-- select @i, @j
+          INSERT brackets
+            (tournID, round, gameNum, seed, winner, bracketType)
+            VALUES (@tournID, @round, @slot, @i, 0, 0)
+          INSERT brackets
+            (tournID, round, gameNum, seed, winner, bracketType)
+            VALUES (@tournID, @round, @slot, @j, 0, 0)
+
+          SELECT @lastError = @@error
+          IF @lastError != 0
+          BEGIN
+            ROLLBACK TRAN 
+            RETURN @lastError
+          END
+
+          DELETE #pairs WHERE player1 = @i AND player2 = @j
+          SELECT @slot = @slot + 1
+        END
+        SELECT @round = @round + 1 
+      END
+    END		-- swiss or round robin
+
+      /* Single or Double Elimination */
+
+    ELSE BEGIN
+      /* 
+       * determine number of rounds
+       */
+      SELECT @rounds = 0
+      DECLARE @p integer
+      SELECT @p = @players
+      WHILE (@p > 1)
+      BEGIN
+        SELECT @rounds = @rounds + 1
+        SELECT @p = @p / 2
+      END
+
+      /*
+       * create bracket entries for each round
+       */
+      SELECT @p = 2
+      SELECT @round = @rounds
+      WHILE( @p <= @players )
+      BEGIN
+        DELETE #games
+        IF @p = 2
+        BEGIN
+          INSERT #games (slot, player1, player2) VALUES (1, 1, 2)
+          INSERT #order (slot, player) VALUES (1, 1)
+        END
+        ELSE BEGIN
+          /* 
+           * determine pairings for this round
+           */
+          DELETE #pairs
+          SELECT @i = 1
+          SELECT @j = @p
+          WHILE ( @i <= (@p / 2) )
+          BEGIN
+            INSERT #pairs (player1, player2) VALUES (@i, @j)
+            SELECT @i = @i + 1
+            SELECT @j = @j - 1
+          END
+
+          /*
+           * determine pairings for previous round
+           */
+          DELETE #prevPairs
+          SELECT @pp = @p / 2
+          SELECT @i = 1
+          SELECT @j = @pp
+          WHILE ( @i <= (@pp / 2) )
+          BEGIN
+            INSERT #prevPairs (player1, player2) VALUES (@i, @j)
+            SELECT @i = @i + 1
+            SELECT @j = @j - 1
+          END
+
+          /*
+           * determine games for this round and order of games for next round
+           */
+          DELETE #newOrder
+          SELECT @odd = 1
+          SELECT @order = 1
+          SELECT @slot = 1
+          DECLARE @cnt int
+          SELECT @cnt = COUNT(*) FROM #order
+          WHILE ( @order <= @cnt )
+          BEGIN
+            SELECT @i = player FROM #order WHERE slot = @order
+            SELECT @j = player2 FROM #prevPairs WHERE player1 = @i
+            IF @odd = 1
+            BEGIN
+              INSERT #newOrder (slot, player) VALUES(@slot, @i)
+              SELECT @tmp = player2 FROM #pairs WHERE player1 = @i
+              INSERT #games (slot, player1, player2) VALUES(@slot, @i, @tmp)
+              SELECT @slot = @slot + 1
+
+              INSERT #newOrder (slot, player) VALUES(@slot, @j)
+              SELECT @tmp = player2 FROM #pairs WHERE player1 = @j
+              INSERT #games (slot, player1, player2) VALUES(@slot, @j, @tmp)
+              SELECT @slot = @slot + 1
+            END
+            ELSE BEGIN
+              INSERT #newOrder (slot, player) VALUES(@slot, @j)
+              SELECT @tmp = player2 FROM #pairs WHERE player1 = @j
+              INSERT #games (slot, player1, player2) VALUES(@slot, @j, @tmp)
+              SELECT @slot = @slot + 1
+
+              INSERT #newOrder (slot, player) VALUES(@slot, @i)
+              SELECT @tmp = player2 FROM #pairs WHERE player1 = @i
+              INSERT #games (slot, player1, player2) VALUES(@slot, @i, @tmp)
+              SELECT @slot = @slot + 1
+            END
+            SELECT @odd = 1 - @odd
+            SELECT @order = @order + 1
+          END
+          DELETE #order
+          SELECT @tmp = COUNT(*) FROM #newOrder
+          SELECT @slot = 1
+          WHILE (@slot <= @tmp)
+          BEGIN
+            SELECT @i = player FROM #newOrder WHERE slot = @slot
+            INSERT #order (slot, player) VALUES( @slot, @i)
+            SELECT @slot = @slot + 1
+          END
+        END
+
+        /*
+         * create bracket records for each player in this round
+         */
+        SELECT @cnt = COUNT(*) FROM #games
+        SELECT @slot = 1
+        WHILE (@slot <= @cnt)
+        BEGIN
+          SELECT @i = player1 FROM #games WHERE slot = @slot
+          SELECT @j = player2 FROM #games WHERE slot = @slot
+          IF @i < @j
+          BEGIN
+            INSERT brackets
+              (tournID, round, gameNum, seed, winner, bracketType)
+              VALUES (@tournID, @round, @slot, @i, 1, 0)
+            INSERT brackets
+              (tournID, round, gameNum, seed, winner, bracketType)
+              VALUES (@tournID, @round, @slot, @j, 0, 0)
+          END
+          ELSE BEGIN
+            INSERT brackets
+              (tournID, round, gameNum, seed, winner, bracketType)
+              VALUES (@tournID, @round, @slot, @j, 1, 0)
+            INSERT brackets
+              (tournID, round, gameNum, seed, winner, bracketType)
+              VALUES (@tournID, @round, @slot, @i, 0, 0)
+          END
+
+          SELECT @lastError = @@error
+          IF @lastError != 0
+          BEGIN
+            ROLLBACK TRAN 
+            RETURN @lastError
+          END
+
+          SELECT @slot = @slot + 1
+        END
+        SELECT @p = @p * 2
+        SELECT @round = @round - 1
+      END
+
+      /* If this is a Double Elimination tournament,
+       * set up the losers bracket
+       */
+      IF @type = 2
+      BEGIN
+
+-- select * from brackets where tournID= @tournID order by round asc, gameNum asc
+
+        /* Find winners bracket losers */
+
+        DECLARE loserCursor CURSOR
+          FOR SELECT seed
+            FROM brackets 
+            WHERE   tournID = @tournID
+            AND       round = @round
+            AND      winner = 0
+            AND bracketType = 0
+            ORDER BY gameNum ASC
+
+        DECLARE loserCursorW CURSOR
+          FOR SELECT seed
+            FROM brackets 
+            WHERE   tournID = @tournID
+            AND       round = @round
+            AND      winner = 0
+            AND bracketType = 0
+            ORDER BY seed ASC
+
+        /* Find losers bracket winners */
+
+        DECLARE loserCursorL CURSOR
+          FOR SELECT seed
+            FROM brackets 
+            WHERE   tournID = @tournID
+            AND       round = @round
+            AND      winner = 1
+            AND bracketType = 1
+            ORDER BY seed DESC
+
+        DECLARE @WBracketLosers int
+        DECLARE @LBracketWinners int
+
+        /* Process all the existing rounds */
+
+        SELECT @round = 1
+        WHILE ((SELECT COUNT(*) FROM brackets WHERE tournID = @tournID AND round = @round) > 0)
+        BEGIN
+          SELECT @nextRound = @round + 1
+
+          SELECT @gameNum = 1
+
+          /* Find the losers from the winners bracket */
+
+          SELECT @WBracketLosers = COUNT(*)
+            FROM brackets
+            WHERE   tournID = @tournID
+            AND       round = @round
+            AND      winner = 0
+            AND bracketType = 0
+
+          SELECT @LBracketWinners = COUNT(*)
+            FROM brackets
+            WHERE   tournID = @tournID
+            AND       round = @round
+            AND      winner = 1
+            AND bracketType = 1
+
+          IF @WBracketLosers > 0
+          BEGIN
+            IF @LBracketWinners > 0
+            BEGIN
+              /* If down to the last winners bracket loser, skip
+               * this round if there is an even number of losers
+               * bracket winners. The remaining winners bracket 
+               * loser (who is the 2nd seed) will play later.
+               */
+-- select 'ROUND', @round, 'winners bracket losers'
+              IF  (@WBracketLosers = 1 AND (@LBracketWinners & 0x01 = 1))
+              OR @WBracketLosers > 1
+              BEGIN
+
+                /* Match winners bracket losers with
+                 * losers bracket winners */
+
+                OPEN loserCursorW
+    	      FETCH loserCursorW INTO @i
+    	      WHILE ( @@sqlstatus = 0 ) 
+	      BEGIN
+                  IF NOT EXISTS
+                    (SELECT seed
+                       FROM brackets
+                       WHERE tournID = @tournID
+                       AND     round = @nextRound
+                       AND      seed = @i)
+                  BEGIN
+                    SELECT @j = NULL
+    	          SELECT @j = max(seed)
+                      FROM brackets
+                      WHERE tournID = @tournID
+                      AND    round = @round
+                      AND bracketType = 1
+                      AND winner = 1
+                      AND seed NOT IN
+                        (SELECT seed
+                           FROM brackets
+                           WHERE tournID = @tournID
+                           AND round = @nextRound)
+                      IF @j = NULL
+                        SELECT @j = 2
+
+-- select 'seed', @i, @j, 'game', @gameNum
+                    IF @i < @j
+                    BEGIN
+                      INSERT brackets
+                        (tournID, round, gameNum, seed, winner, bracketType)
+                        VALUES (@tournID, @nextRound, @gameNum, @i, 1, 1)
+                      INSERT brackets
+                        (tournID, round, gameNum, seed, winner, bracketType)
+                        VALUES (@tournID, @nextRound, @gameNum, @j, 0, 1)
+                    END
+                    ELSE BEGIN
+                      INSERT brackets
+                        (tournID, round, gameNum, seed, winner, bracketType)
+                        VALUES (@tournID, @nextRound, @gameNum, @j, 1, 1)
+                      INSERT brackets
+                        (tournID, round, gameNum, seed, winner, bracketType)
+                        VALUES (@tournID, @nextRound, @gameNum, @i, 0, 1)
+                    END
+
+                    SELECT @lastError = @@error
+                    IF @lastError != 0
+                    BEGIN
+                      ROLLBACK TRAN 
+                      RETURN @lastError
+                    END
+                    SELECT @gameNum = @gameNum + 1
+                  END
+    	        FETCH loserCursorW INTO @i
+                END
+                CLOSE loserCursorW
+              END
+
+              /* Process any remaining losers bracket winners */
+
+-- select 'ROUND', @round, 'remaining losers bracket winners'
+-- select * from brackets where tournID=@tournID and bracketType=1 and round >= @round
+              OPEN loserCursorL
+    	    FETCH loserCursorL INTO @i
+    	    WHILE ( @@sqlstatus = 0 ) 
+	    BEGIN
+                IF NOT EXISTS
+                  (SELECT seed
+                     FROM brackets
+                     WHERE tournID = @tournID
+                     AND     round = @nextRound
+                     AND      seed = @i)
+                BEGIN
+                  SELECT @j = NULL
+    	        SELECT @j = min(seed)
+                    FROM brackets
+                    WHERE tournID = @tournID
+                    AND    round = @round
+                    AND bracketType = 1
+                    AND winner = 1
+                    AND seed NOT IN
+                      (SELECT seed
+                         FROM brackets
+                         WHERE tournID = @tournID
+                         AND round = @nextRound)
+                  IF @j = NULL OR @i = @j
+                    SELECT @j = 2
+-- select 'X seed', @i, @j, 'game', @gameNum
+                  IF @i < @j
+                  BEGIN
+                    INSERT brackets
+                      (tournID, round, gameNum, seed, winner, bracketType)
+                      VALUES (@tournID, @nextRound, @gameNum, @i, 1, 1)
+                    INSERT brackets
+                      (tournID, round, gameNum, seed, winner, bracketType)
+                      VALUES (@tournID, @nextRound, @gameNum, @j, 0, 1)
+                  END
+                  ELSE BEGIN
+                    INSERT brackets
+                      (tournID, round, gameNum, seed, winner, bracketType)
+                      VALUES (@tournID, @nextRound, @gameNum, @j, 1, 1)
+                    INSERT brackets
+                      (tournID, round, gameNum, seed, winner, bracketType)
+                      VALUES (@tournID, @nextRound, @gameNum, @i, 0, 1)
+                  END
+
+                  SELECT @lastError = @@error
+                  IF @lastError != 0
+                  BEGIN
+                    ROLLBACK TRAN 
+                    RETURN @lastError
+                  END
+                  SELECT @gameNum = @gameNum + 1
+                END
+    	      FETCH loserCursorL INTO @i
+              END
+              CLOSE loserCursorL
+            END
+
+            /* Empty losers bracket this round */
+
+            ELSE BEGIN
+-- select 'ROUND', @round, 'empty losers bracket'
+              OPEN loserCursor
+    	    FETCH loserCursor INTO @i
+    	    WHILE ( @@sqlstatus = 0 ) 
+	    BEGIN
+    	      FETCH loserCursor INTO @j
+-- select 'seed', @i, @j, 'game', @gameNum
+                IF @i < @j
+                BEGIN
+                  INSERT brackets
+                    (tournID, round, gameNum, seed, winner, bracketType)
+                    VALUES (@tournID, @nextRound, @gameNum, @i, 1, 1)
+                  INSERT brackets
+                    (tournID, round, gameNum, seed, winner, bracketType)
+                    VALUES (@tournID, @nextRound, @gameNum, @j, 0, 1)
+                END
+                ELSE BEGIN
+                  INSERT brackets
+                    (tournID, round, gameNum, seed, winner, bracketType)
+                    VALUES (@tournID, @nextRound, @gameNum, @j, 1, 1)
+                  INSERT brackets
+                    (tournID, round, gameNum, seed, winner, bracketType)
+                    VALUES (@tournID, @nextRound, @gameNum, @i, 0, 1)
+                END
+
+                SELECT @lastError = @@error
+                IF @lastError != 0
+                BEGIN
+                  ROLLBACK TRAN 
+                  RETURN @lastError
+                END
+    	      FETCH loserCursor INTO @i
+                SELECT @gameNum = @gameNum + 1
+              END
+              CLOSE loserCursor
+            END
+          END
+
+          /* Empty winners bracket this round */
+          ELSE BEGIN
+-- select 'ROUND', @round, 'empty winners', @LBracketWinners
+            IF @LBracketWinners > 0
+            BEGIN
+
+              IF @LBracketWinners > 1
+              BEGIN
+
+                OPEN loserCursorL
+    	      FETCH loserCursorL INTO @i
+    	      WHILE ( @@sqlstatus = 0 ) 
+	      BEGIN
+                  IF NOT EXISTS
+                    (SELECT seed
+                       FROM brackets
+                       WHERE tournID = @tournID
+                       AND     round = @nextRound
+                       AND      seed = @i)
+                  BEGIN
+                    SELECT @j = NULL
+    	          SELECT @j = min(seed)
+                      FROM brackets
+                      WHERE tournID = @tournID
+                      AND    round = @round
+                      AND bracketType = 1
+                      AND winner = 1
+                      AND seed NOT IN
+                        (SELECT seed
+                           FROM brackets
+                           WHERE tournID = @tournID
+                           AND round = @nextRound)
+-- select 'seed', @i, @j, 'game', @gameNum
+                    IF @i < @j
+                    BEGIN
+                      INSERT brackets
+                        (tournID, round, gameNum, seed, winner, bracketType)
+                        VALUES (@tournID, @nextRound, @gameNum, @i, 1, 1)
+                      INSERT brackets
+                        (tournID, round, gameNum, seed, winner, bracketType)
+                        VALUES (@tournID, @nextRound, @gameNum, @j, 0, 1)
+                    END
+                    ELSE BEGIN
+                      INSERT brackets
+                        (tournID, round, gameNum, seed, winner, bracketType)
+                        VALUES (@tournID, @nextRound, @gameNum, @j, 1, 1)
+                      INSERT brackets
+                        (tournID, round, gameNum, seed, winner, bracketType)
+                        VALUES (@tournID, @nextRound, @gameNum, @i, 0, 1)
+                    END
+
+                    SELECT @lastError = @@error
+                    IF @lastError != 0
+                    BEGIN
+                      ROLLBACK TRAN 
+                      RETURN @lastError
+                    END
+                    SELECT @gameNum = @gameNum + 1
+                  END
+                  FETCH loserCursorL INTO @i
+                END
+                CLOSE loserCursorL
+              END
+
+              /* Only one losers bracket game */
+
+              ELSE BEGIN
+    	      SELECT @j = min(seed)
+                  FROM brackets
+                  WHERE tournID = @tournID
+                  AND    round = @round
+                  AND bracketType = 1
+                  AND winner = 1
+                  AND seed NOT IN
+                    (SELECT seed
+                       FROM brackets
+                       WHERE tournID = @tournID
+                       AND round = @nextRound)
+                IF @j != 2
+                BEGIN
+                  SELECT @i = 2
+-- select 'seed', @i, @j, 'game', @gameNum
+                  INSERT brackets
+                    (tournID, round, gameNum, seed, winner, bracketType)
+                    VALUES (@tournID, @nextRound, @gameNum, @i, 1, 1)
+                  INSERT brackets
+                    (tournID, round, gameNum, seed, winner, bracketType)
+                    VALUES (@tournID, @nextRound, @gameNum, @j, 0, 1)
+
+                  SELECT @lastError = @@error
+                  IF @lastError != 0
+                  BEGIN
+                    ROLLBACK TRAN 
+                    RETURN @lastError
+                  END
+                END
+              END
+            END
+          END
+
+          SELECT @round = @round + 1
+        END
+
+        /* Add the game for the winner of the winners bracket
+         * versus the winner of the losers bracket, plus the 
+         * optional final round if there is no undefeated player.
+         */
+        SELECT @nextRound = max(round)
+          FROM brackets
+          WHERE tournID = @tournID
+          
+        SELECT @nextRound = @nextRound + 1
+        INSERT brackets
+          (tournID, round, gameNum, seed, winner, bracketType)
+          VALUES (@tournID, @nextRound, 1, 1, 0, 2)
+        INSERT brackets
+          (tournID, round, gameNum, seed, winner, bracketType)
+          VALUES (@tournID, @nextRound, 1, 2, 0, 2)
+
+        SELECT @lastError = @@error
+        IF @lastError != 0
+        BEGIN
+          ROLLBACK TRAN
+          RETURN @lastError
+        END
+
+        SELECT @nextRound = @nextRound + 1
+
+        INSERT brackets
+          (tournID, round, gameNum, seed, winner, bracketType)
+          VALUES (@tournID, @nextRound, 1, 1, 0, 2)
+        INSERT brackets
+          (tournID, round, gameNum, seed, winner, bracketType)
+          VALUES (@tournID, @nextRound, 1, 2, 0, 2)
+
+        SELECT @lastError = @@error
+        IF @lastError != 0
+        BEGIN
+          ROLLBACK TRAN
+          RETURN @lastError
+        END
+
+      END
+
+      /* To facilitate building the losers bracket, winners were
+       * assigned. We need to clear all the winner flags before 
+       * starting the tournament.
+       */
+      UPDATE brackets SET winner = 0 WHERE tournID = @tournID
+
+    END			-- single or double elimination
+  COMMIT TRAN
+
+  DROP TABLE #order
+  DROP TABLE #newOrder
+  DROP TABLE #games
+  DROP TABLE #pairs
+  DROP TABLE #prevPairs
+
+  RETURN 0
+END
+GO

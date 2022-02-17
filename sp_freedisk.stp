@@ -1,0 +1,28 @@
+create procedure sp_freedisk
+as
+begin
+
+  set nocount on
+
+  select
+  logical_name = substring(d.name, 1, 12),
+  physical_name = substring(d.phyname, 1, 17),
+  vdevno = d.low / power(2, 24),
+  size = (d.high - d.low + 1) * 2 / 1024,
+  reserved = isnull(sum(u.size) * 2 / 1024, 0),
+  left = (d.high - d.low + 1) * 2 / 1024 -
+  isnull(sum(u.size) * 2 / 1024, 0)
+  from
+  master.dbo.sysdevices d, master.dbo.sysusages u
+  where
+  d.status & 2 = 2
+  and u.vstart / power(2, 24)=*d.low / power(2, 24)
+  group by
+  substring(d.name, 1, 12),
+  substring(d.phyname, 1, 17),
+  d.low / power(2, 24),
+  (d.high - d.low + 1) * 2 / 1024
+  order by vdevno
+
+end
+go

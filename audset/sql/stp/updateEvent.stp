@@ -1,0 +1,477 @@
+/* update the record for an existing event:
+  name, client name, background, title, 
+  welcome message, show on PTG flag, 
+  stageCapacity, row size, # of rows */
+
+/* input:  event id, event title, 
+           auditorium name, client name,
+           time, background URL, 
+           open time, open title, open welcome msg,
+           start time, start title, start welcome msg,
+           start time, start title, start welcome msg,
+           end time,
+           event interactions list
+           output: NONE
+*/
+
+CREATE PROC updateEvent
+(
+  @eventID		eventIdentifier,
+  @title		longName = NULL,
+  @auditoriumName	varchar(16) = NULL,
+  @clientName		varchar(16) = NULL,
+  @time			VpTime = NULL,
+  @background		longName = NULL,
+  @openTime		VpTime = NULL,
+  @openTitle		longName = NULL,
+  @openWelcomeMsg1	longName = NULL,
+  @openWelcomeMsg2	longName = NULL,
+  @startTime		VpTime = NULL,
+  @startTitle		longName = NULL,
+  @startWelcomeMsg1	longName = NULL,
+  @startWelcomeMsg2	longName = NULL,
+  @endTime		VpTime = NULL,
+  @eventInteractions	longName = NULL
+)
+AS
+BEGIN
+  DECLARE @oldTitle		 longName
+  DECLARE @oldAuditorium	 auditoriumIdentifier
+  DECLARE @newAuditorium	 auditoriumIdentifier
+  DECLARE @oldClientName	 varchar(16)
+  DECLARE @oldTime		 VpTime
+  DECLARE @oldBackground	 longName
+  DECLARE @currentState		 integer
+  DECLARE @oldStateTime		 VpTime
+  DECLARE @oldOpenTime		 VpTime
+  DECLARE @oldEndTime		 VpTime
+  DECLARE @oldStateTitle	 longName
+  DECLARE @oldStateWelcomeMsg1	 longName
+  DECLARE @oldStateWelcomeMsg2	 longName
+  DECLARE @description 		 varchar(16)
+  DECLARE @commaPos 		 integer
+  DECLARE @counter 		 integer
+  DECLARE @canUpdateInteractions bit
+  
+  DECLARE @lastError int
+  BEGIN TRAN updateEvent
+             
+    /* first check if the event exists */
+    SELECT @oldClientName = client,
+           @oldTitle = title,
+           @oldAuditorium = auditorium,
+           @oldTime = date,
+           @oldBackground = stageBackground,
+           @currentState = currentState
+      FROM events
+      WHERE eventID = @eventID
+      
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      RAISERROR @lastError
+      ROLLBACK TRAN updateEvent
+      RETURN @lastError
+    END
+    
+    /* If NULL values were passed,
+       use the existing values in the update */
+    IF @oldTime IS NULL
+    BEGIN
+      /* could not find matching event */
+      ROLLBACK TRAN updateEvent
+      RETURN 20001
+    END
+    
+    IF @title IS NULL
+      SELECT @title = @oldTitle
+    IF @auditoriumName IS NULL
+      SELECT @newAuditorium = @oldAuditorium
+    ELSE
+    BEGIN
+      /* verify that we have an auditorium 
+         with a matching name */
+      SELECT @newAuditorium = auditoriumID
+        FROM auditoriums
+        WHERE name = @auditoriumName
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        raiserror @lastError
+        ROLLBACK TRAN updateEvent
+        RETURN @lastError
+      END
+      IF @newAuditorium IS NULL
+      BEGIN
+        ROLLBACK TRAN updateEvent
+        RETURN 20002
+      END
+    END
+    
+    IF @clientName IS NULL
+      SELECT @clientName = @oldClientName
+    IF @time IS NULL
+      SELECT @time = @oldTime
+    IF @background IS NULL
+      SELECT @background = @oldBackground
+    
+    UPDATE events
+      SET title = @title,
+          auditorium = @newAuditorium,
+          client = @clientName,
+          stageBackground = @background
+      WHERE eventID = @eventID
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      RAISERROR @lastError
+      ROLLBACK TRAN updateEvent
+      RETURN @lastError
+    END
+    
+    /* ----------------------------------------- */
+    /* Now continue the update by                */
+    /* updating the event's states               */
+    /* ----------------------------------------- */
+    /* ------------------------ */
+    /* do update of Open State  */
+    /* ------------------------ */
+    SELECT @oldStateTime = time,
+           @oldStateTitle = PTGtitle,
+           @oldStateWelcomeMsg1 = welcomeMsg1,
+           @oldStateWelcomeMsg2 = welcomeMsg2
+      FROM eventState
+      WHERE eventID = @eventID AND
+            stateID = 1  /* OPEN state */
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      raiserror @lastError
+      ROLLBACK TRAN updateEvent
+      RETURN @lastError
+    END
+      
+    /* can't change event interaction types after event is
+       opened */
+    IF ( @currentState = 0 )
+      SELECT @canUpdateInteractions = 1
+    ELSE
+      SELECT @canUpdateInteractions = 0
+    
+    IF ( ( @openTime IS NOT NULL )		OR
+         ( @openTitle IS NOT NULL )		OR
+         ( @openWelcomeMsg1 IS NOT NULL )	OR
+         ( @openWelcomeMsg2 IS NOT NULL )          )
+    BEGIN
+      /* updates to state after its time has arrived
+         are not permitted */
+      IF ( @currentState >= 1 ) AND ( @openTime IS NOT NULL )
+      BEGIN
+        ROLLBACK TRAN updateEvent
+        RETURN 20003
+      END
+      
+      /* update the open state */
+      /* first, get the current data */
+      IF ( @openTime IS NULL )
+        SELECT @openTime = @oldStateTime
+      IF ( @openTitle IS NULL )
+        SELECT @openTitle = @oldStateTitle
+      ELSE
+      BEGIN
+        /* Add event title change record for this state */
+        IF @currentState = 1
+        INSERT eventChanges
+          VALUES(@eventID, @currentState, 3)    /* 3 = title change */
+        
+        SELECT @lastError = @@error
+        IF @lastError != 0
+        BEGIN
+          raiserror @lastError
+          ROLLBACK TRAN updateEvent
+          RETURN @lastError
+        END
+        
+      END
+      
+      IF NOT ( @openWelcomeMsg1 IS NULL ) OR NOT ( @openWelcomeMsg2 IS NULL)
+      BEGIN
+        IF @currentState = 1
+        BEGIN
+          /* Add event welcome message change record for this state */
+          INSERT eventChanges
+            VALUES(@eventID, @currentState, 2)    /* 2 = welcome message change */
+          
+          SELECT @lastError = @@error
+          IF @lastError != 0
+          BEGIN
+            raiserror @lastError
+            ROLLBACK TRAN updateEvent
+            RETURN @lastError
+          END
+          
+        END
+      END
+      
+      IF ( @openWelcomeMsg1 IS NULL )
+        SELECT @openWelcomeMsg1 = @oldStateWelcomeMsg1
+    
+      IF ( @openWelcomeMsg2 IS NULL )
+        SELECT @openWelcomeMsg2 = @oldStateWelcomeMsg2
+    
+      UPDATE eventState
+        SET time = @openTime,
+            PTGtitle = @openTitle,
+            welcomeMsg1 = @openWelcomeMsg1,
+            welcomeMsg2 = @openWelcomeMsg2
+        WHERE eventID = @eventID AND
+              stateID = 1
+      
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        RAISERROR @lastError
+        ROLLBACK TRAN updateEvent
+        RETURN @lastError
+      END
+    END /* changes to open state */
+    IF ( ( @openTime IS NOT NULL ) OR
+         ( @endTime IS NOT NULL )     )
+    BEGIN
+      SELECT @oldOpenTime = @oldStateTime
+      IF ( @openTime IS NULL )
+      BEGIN
+        SELECT @openTime = @oldOpenTime
+      END
+    END
+    
+    /* ------------------------ */
+    /* do update of Start State */
+    /* ------------------------ */
+    SELECT @oldStateTime = time,
+           @oldStateTitle = PTGtitle,
+           @oldStateWelcomeMsg1 = welcomeMsg1,
+           @oldStateWelcomeMsg2 = welcomeMsg2
+      FROM eventState
+      WHERE eventID = @eventID AND
+            stateID = 2	/* 2 = Started state */
+    IF ( ( @startTime IS NOT NULL )		OR
+         ( @startTitle IS NOT NULL )		OR
+         ( @startWelcomeMsg1 IS NOT NULL )	OR
+         ( @startWelcomeMsg2 IS NOT NULL )          )
+    BEGIN
+      /* updates to state after its time has arrived
+      are not permitted */
+      IF ( @currentState >= 2 ) AND ( @startTime IS NOT NULL )
+      BEGIN
+        ROLLBACK TRAN updateEvent
+        RETURN 20003
+      END
+    
+      /* update the start state */
+      /* first, get the current data */
+      SELECT @oldStateTime = time,
+             @oldStateTitle = PTGtitle,
+             @oldStateWelcomeMsg1 = welcomeMsg1,
+             @oldStateWelcomeMsg2 = welcomeMsg2
+        FROM eventState
+        WHERE eventID = @eventID AND
+              stateID = 2
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        raiserror @lastError
+        ROLLBACK TRAN updateEvent
+        RETURN @lastError
+      END
+    
+      IF ( @startTime IS NULL )
+        SELECT @startTime = @oldStateTime
+      IF ( @startTitle IS NULL )
+        SELECT @startTitle = @oldStateTitle
+      ELSE
+      BEGIN
+        IF @currentState = 2
+        BEGIN
+          /* Add event title change record for this state */
+          INSERT eventChanges
+            VALUES(@eventID, @currentState, 3)    /* 3 = title change */
+          
+          SELECT @lastError = @@error
+          IF @lastError != 0
+          BEGIN
+            raiserror @lastError
+            ROLLBACK TRAN updateEvent
+            RETURN @lastError
+          END
+          
+        END
+      END
+    
+      IF NOT( @openWelcomeMsg1 IS NULL ) OR NOT ( @openWelcomeMsg2 IS NULL)
+      BEGIN
+        IF @currentState = 2
+        BEGIN
+          /* Add event welcome message change record for this state */
+          INSERT eventChanges
+            VALUES(@eventID, @currentState, 2)    /* 2 = welcome message change */
+          
+          SELECT @lastError = @@error
+          IF @lastError != 0
+          BEGIN
+            raiserror @lastError
+            ROLLBACK TRAN updateEvent
+            RETURN @lastError
+          END
+          
+        END
+      END
+    
+      IF ( @startWelcomeMsg1 IS NULL )
+        SELECT @startWelcomeMsg1 = @oldStateWelcomeMsg1
+      IF ( @startWelcomeMsg2 IS NULL )
+        SELECT @startWelcomeMsg2 = @oldStateWelcomeMsg2
+      UPDATE eventState
+        SET time = @startTime,
+            PTGtitle = @startTitle,
+            welcomeMsg1 = @startWelcomeMsg1,
+            welcomeMsg2 = @startWelcomeMsg2
+        WHERE eventID = @eventID AND
+              stateID = 2
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        raiserror @lastError
+        ROLLBACK TRAN updateEvent
+        RETURN @lastError
+      END
+    END
+    
+    /* ------------------------ */
+    /* do update of End State   */
+    /* ------------------------ */
+    IF ( ( @endTime IS NOT NULL ) OR
+         ( @openTime IS NOT NULL )   )
+    BEGIN
+      /* get the current end time */
+      SELECT @oldStateTime = time
+        FROM eventState
+        WHERE eventID = @eventID AND
+              stateID = 3
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        raiserror @lastError
+        ROLLBACK TRAN updateEvent
+        RETURN @lastError
+      END
+    END
+    IF ( @endTime IS NOT NULL )
+    BEGIN
+      /* update the end state */
+      /* updates to state after its time has arrived
+         are not permitted */
+      IF ( @currentState = 3 )
+      BEGIN
+        ROLLBACK TRAN updateEvent
+        RETURN 20003
+      END
+    
+      IF ( @oldStateTime != @endTime )
+      BEGIN
+        UPDATE eventState
+          SET time = @endTime
+          WHERE eventID = @eventID AND
+                stateID = 3
+        SELECT @lastError = @@error
+        IF @lastError != 0
+        BEGIN
+          raiserror @lastError
+          ROLLBACK TRAN updateEvent
+          RETURN @lastError
+        END
+      END
+      
+      SELECT @oldEndTime = @oldStateTime
+    END /* update end state */
+    ELSE
+    BEGIN
+      IF ( @openTime IS NOT NULL )
+      BEGIN
+        SELECT @endTime = @oldEndTime
+      END
+    END
+    
+    /* find if the time frame asked for is not booked already */
+    IF ( ( @openTime IS NOT NULL ) AND
+         ( ( @openTime != @oldOpenTime ) OR
+           ( @endTime != @oldEndTime )      )  )
+    BEGIN
+      IF EXISTS 
+        ( SELECT events.eventID
+          FROM eventTimes, events
+           WHERE eventTimes.eventID = events.eventID AND
+                 events.eventID != @eventID          AND
+                 events.auditorium = @newAuditorium  AND
+                 ( ( startTime BETWEEN @openTime AND @endTime ) OR
+                   ( endTime BETWEEN @openTime AND @endTime )    ) )
+      BEGIN
+        /* event overlaps other event(s) */
+        ROLLBACK TRAN updateEvent
+        RETURN 20002
+      END
+      
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        RAISERROR @lastError
+        ROLLBACK TRAN updateEvent
+        RETURN @lastError
+      END
+    END
+    
+    /* ------------------------------------ */
+    /* do update of event interaction types */
+    /* ------------------------------------ */
+    IF ( @canUpdateInteractions = 1 )     AND /*Event not opened */
+       ( @eventInteractions IS NOT NULL )
+    BEGIN
+      /* first, delete the current interaction types */
+      DELETE interactionsAllowed
+        WHERE eventID = @eventID
+    
+      /* parse list of interaction types */
+      SELECT @counter = 1
+      WHILE ( ascii( rtrim(ltrim(@eventInteractions ))) > 32 )
+      BEGIN
+        SELECT @commaPos = patindex( "%,%", @eventInteractions )
+        IF @commaPos = 0 BEGIN
+          SELECT @description = rtrim(ltrim(@eventInteractions))
+          SELECT @eventInteractions = ""
+        END
+        ELSE BEGIN
+          SELECT @description = 
+              rtrim( ltrim( substring( @eventInteractions, 1, @commaPos-1) ) )
+          SELECT @eventInteractions = 
+            substring( @eventInteractions, 
+                       @commaPos+1, 
+                       char_length( @eventInteractions ) - @commaPos )
+        END
+    
+        INSERT interactionsAllowed 
+               ( eventID, interactionType, name )
+          VALUES ( @eventID, @counter, @description )
+        SELECT @lastError = @@error
+        IF @lastError != 0
+        BEGIN
+          raiserror @lastError
+          ROLLBACK TRAN updateEvent
+          RETURN @lastError
+        END
+        SELECT @counter = @counter + 1
+      END /* of while */
+    END
+  COMMIT TRAN updateEvent
+END
+GO

@@ -1,0 +1,66 @@
+/* remove deleted users, allowing X days 
+   from deletion to actual removal */
+/* input:  allowed number of days since deletion
+   output: NONE                                  */
+CREATE PROC removeDeletedUsers 
+( 
+  @daysToWait integer
+)
+AS
+BEGIN
+  DECLARE @lastError int
+  DECLARE @diffFromGMT int
+  DECLARE @currentDate VpTime
+  DECLARE @deleteBeforeDate VpTime
+  DECLARE @localTransaction bit
+  SELECT @localTransaction = 1 - sign(@@trancount)
+  
+  IF @localTransaction = 1
+    BEGIN TRAN removeDeletedUsers
+    
+    SELECT @diffFromGMT = gmt
+      FROM getGMT
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN /* NOTE: --> */
+      /* name of transaction is not specified,
+         for the case where the procedure is 
+         called from inside another transaction. */
+      
+      RETURN @lastError
+    END
+
+    IF @diffFromGMT IS NULL
+      SELECT @diffFromGMT = 0
+    SELECT @currentDate = dateadd( hour, (-1) * @diffFromGMT, getdate() )
+    SELECT @deleteBeforeDate = dateadd( day, (-1) * @daysToWait, @currentDate )
+    
+    DELETE registration
+      WHERE deleteDate <= @deleteBeforeDate
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+    
+    DELETE FROM users
+      WHERE registrationMode = 2 AND
+            nickName NOT IN 
+              ( SELECT nickName
+                  FROM registeredNames )
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+  IF @localTransaction = 1
+    COMMIT TRAN removeDeletedUsers
+END
+GO

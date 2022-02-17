@@ -1,0 +1,69 @@
+/* update a user registration record */
+/* input:  userID, 
+	   locked (0=clear, 1=set, -1=no change)
+	   restricted (0=clear, 1=set, -1=no change)
+	   penalties (0=clear, >0 = increment by that amount, -1=no change)
+	   warnings (0=clear, >0 = increment by that amount, -1=no change)
+	   ignores (0=clear, >0 = increment by that amount, -1=no change)
+   output: Return value - 0 - success 
+                          20001 - No such user existed in database
+*/
+CREATE PROC updateRegStatus (
+	@userID userIdentifier,
+	@locked bit,
+	@restricted bit,
+	@penalties smallInt,
+	@warnings smallInt,
+	@ignores smallInt)
+AS
+BEGIN
+  DECLARE @lastError int
+  
+  DECLARE @pCount int
+  DECLARE @wCount int
+  DECLARE @1Count int
+  DECLARE @aid    userIdentifier
+  
+  BEGIN TRAN
+    SELECT @aid = accountID
+      FROM registration
+      WHERE userID = @userID
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    UPDATE userAccounts
+      SET accountStatus = @accountStatus
+      WHERE accountID = @accountID
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+    
+    DECLARE @locked bit
+    IF @accountStatus = 0
+      SELECT @locked = 0
+    ELSE
+      SELECT @locked = 1
+
+    UPDATE registration
+      SET locked = @locked
+      WHERE accountID = @accountID
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+  COMMIT TRAN
+END
+GO

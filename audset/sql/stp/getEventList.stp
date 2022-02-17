@@ -1,0 +1,50 @@
+/* get details of events, for the events specified */
+/* input: 
+     auditorium name - (optional) name of auditorium for
+                which to get the events. NOTE: "*" has 
+                special meaning - show all auditoriums.
+     show past flag - whether to show events that have ended
+     open flag - whether to show events that have just opened
+     in progress flag - whether to show events that are in progress (started)
+     future flag - whether to show events that have been defined
+                   but have not opened yet
+       (all this sorting by time will be done by the event's 
+        currentState field)
+   output: list of events, stating for each -
+   id, start time, end time, title, auditorium name
+   21/07/97: Added current event state in returned columns
+*/
+CREATE PROC getEventList
+(
+  @auditoriumName varchar(16),
+  @showPast       bit,
+  @showOpen       bit,
+  @showPresent    bit,
+  @showFuture     bit
+)
+AS
+BEGIN
+  IF ( @auditoriumName = "*" )
+    SELECT @auditoriumName = "%"
+  SELECT events.eventID, 
+         startState.time AS startTime, 
+         endState.time AS endTime, 
+         events.title, auditoriums.name AS auditoriumName,
+         events.currentState AS status
+    FROM events, auditoriums,
+         eventState startState, eventState endState
+    WHERE auditoriums.name LIKE @auditoriumName AND
+          events.auditorium = auditoriums.auditoriumID AND
+          events.eventID = startState.eventID AND
+          events.eventID = endState.eventID AND
+          startState.stateID = 2 AND
+          endState.stateID   = 3 AND
+          (
+            ( ( @showFuture = 1 ) AND ( events.currentState = 0 ) ) OR
+            ( ( @showPast = 1 ) AND ( events.currentState = 3 ) ) OR
+            ( ( @showOpen = 1 ) AND ( events.currentState = 1 ) ) OR
+            ( ( @showPresent = 1 ) AND ( events.currentState = 2 ) )
+          )
+    ORDER BY startState.time
+END
+GO

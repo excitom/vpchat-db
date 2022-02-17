@@ -1,0 +1,51 @@
+/*
+ * get referral information for an account
+ *
+ * INPUT: accountID
+ * OUTPUT: referring account owner chat name, referral date, account status, 
+ *            referral type
+ */
+
+IF EXISTS(SELECT name FROM sysobjects WHERE name='getReferrals' AND type='P')
+ DROP PROC getReferrals
+GO
+CREATE PROC getReferrals ( @accountID userIdentifier )
+AS
+BEGIN
+  DECLARE @diffFromGMT int
+  DECLARE @lastError int
+  DECLARE @referralDate VpTime
+  DECLARE @paymentDate VpTime
+  DECLARE @accountStatus tinyint
+  DECLARE @nickName VPuserID
+  DECLARE @type tinyint
+  DECLARE @billingCycle tinyint
+
+  SELECT @diffFromGMT = gmt
+    FROM getGMT
+  IF @diffFromGMT IS NULL
+    SELECT @diffFromGMT = 0
+    
+  SELECT @lastError = @@error
+  IF @lastError != 0
+  BEGIN
+    RETURN @lastError
+  END
+
+  SELECT accountStatus, nickName,
+         dateadd( hour, @diffFromGMT, creationDate) AS referralDate,
+         type, paymentDate, billingCycle
+    FROM userAccounts,users,referrals
+    WHERE referrals.referredByID = @accountID
+    AND referrals.accountID=userAccounts.accountID
+    AND users.userID=userAccounts.ownerID
+    AND accountStatus != 1
+    ORDER BY dateadd( hour, @diffFromGMT, creationDate) ASC
+
+END
+GO
+IF OBJECT_ID('dbo.getReferrals') IS NOT NULL
+        PRINT '<<< CREATED PROCEDURE dbo.getReferrals >>>'
+ELSE
+        PRINT '<<< FAILED CREATING PROCEDURE dbo.getReferrals >>>'
+GO

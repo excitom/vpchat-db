@@ -1,0 +1,164 @@
+/*
+ * Return information about scheduled event calendar
+ *
+ * Tom Lang 8/2012
+ */
+IF EXISTS(SELECT name FROM sysobjects WHERE name='getCalendar' AND type='P')
+ DROP PROC getCalendar
+GO
+CREATE PROC getCalendar (
+  @fromDate	dateTime,
+  @toDate	dateTime = NULL,
+  @clientTZ	integer = NULL,
+  @type		integer = 0,
+  @showPending	bit = 0
+)
+AS
+BEGIN
+  DECLARE @diffFromGMT	integer
+
+  IF @clientTZ IS NOT NULL
+    SELECT @diffFromGMT = @clientTZ
+  ELSE BEGIN
+    SELECT @diffFromGMT = intValue
+      FROM vpusers..configurationKeys
+      WHERE keyName = 'diffFromGMT'
+  END
+
+  SELECT @fromDate = dateadd( hour, (-1) * @diffFromGMT, @fromDate )
+
+  IF @showPending = 1
+  BEGIN
+    IF @type = 0
+    BEGIN
+      IF @toDate IS NULL
+      BEGIN
+        SELECT e.eventID,
+               dateadd( hour, @diffFromGMT, startDate) AS startDate,
+               dateadd( hour, @diffFromGMT, endDate) AS endDate,
+               type, allDay, repeat, capacity, pendingApproval,
+               URL, description
+          FROM calendar e
+          WHERE startDate >= @fromDate
+        ORDER BY dateadd( hour, @diffFromGMT, startDate) ASC
+      END
+      /* from and to date, all types */
+      ELSE BEGIN
+        SELECT @toDate = dateadd( hour, (-1) * @diffFromGMT, @toDate )
+        SELECT e.eventID,
+               dateadd( hour, @diffFromGMT, startDate) AS startDate,
+               dateadd( hour, @diffFromGMT, endDate) AS endDate,
+               type, allDay, repeat, capacity, pendingApproval,
+               URL, description
+          FROM calendar e
+            WHERE ((startDate BETWEEN @fromDate AND @toDate)
+             OR  (endDate BETWEEN @fromDate AND @toDate)
+             OR  ((startDate < @fromDate) AND (endDate > @toDate)))
+        ORDER BY dateadd( hour, @diffFromGMT, startDate) ASC
+      END
+    END
+    /* specific event type */
+    ELSE BEGIN
+      IF @toDate IS NULL
+      BEGIN
+        SELECT e.eventID,
+               dateadd( hour, @diffFromGMT, startDate) AS startDate,
+               dateadd( hour, @diffFromGMT, endDate) AS endDate,
+               type, allDay, repeat, capacity, pendingApproval,
+               URL, description
+          FROM calendar e
+          WHERE startDate >= @fromDate
+          AND   type = @type
+        ORDER BY dateadd( hour, @diffFromGMT, startDate) ASC
+      END
+    /* specific event type, from and to date range */
+      ELSE BEGIN
+        SELECT @toDate = dateadd( hour, (-1) * @diffFromGMT, @toDate )
+        SELECT e.eventID,
+               dateadd( hour, @diffFromGMT, startDate) AS startDate,
+               dateadd( hour, @diffFromGMT, endDate) AS endDate,
+               type, allDay, repeat, capacity, pendingApproval,
+               URL, description
+          FROM calendar e
+            WHERE type = @type
+            AND ((startDate BETWEEN @fromDate AND @toDate)
+             OR  (endDate BETWEEN @fromDate AND @toDate)
+             OR  ((startDate < @fromDate) AND (endDate > @toDate)))
+        ORDER BY dateadd( hour, @diffFromGMT, startDate) ASC
+      END
+    END
+  END
+  -- don't include pending calendar
+  ELSE BEGIN
+    IF @type = 0
+    BEGIN
+      IF @toDate IS NULL
+      BEGIN
+        SELECT e.eventID,
+               dateadd( hour, @diffFromGMT, startDate) AS startDate,
+               dateadd( hour, @diffFromGMT, endDate) AS endDate,
+               type, allDay, repeat, capacity, pendingApproval,
+               URL, description
+          FROM calendar e
+          WHERE startDate >= @fromDate
+          AND   e.pendingApproval = 0
+        ORDER BY dateadd( hour, @diffFromGMT, startDate) ASC
+      END
+      /* from and to date, all types */
+      ELSE BEGIN
+        SELECT @toDate = dateadd( hour, (-1) * @diffFromGMT, @toDate )
+        SELECT e.eventID,
+               dateadd( hour, @diffFromGMT, startDate) AS startDate,
+               dateadd( hour, @diffFromGMT, endDate) AS endDate,
+               type, allDay, repeat, capacity, pendingApproval,
+               URL, description
+          FROM calendar e
+            WHERE ((startDate BETWEEN @fromDate AND @toDate)
+             OR  (endDate BETWEEN @fromDate AND @toDate)
+             OR  ((startDate < @fromDate) AND (endDate > @toDate)))
+            AND   e.pendingApproval = 0
+        ORDER BY dateadd( hour, @diffFromGMT, startDate) ASC
+      END
+    END
+    /* specific event type */
+    ELSE BEGIN
+      IF @toDate IS NULL
+      BEGIN
+        SELECT e.eventID,
+               dateadd( hour, @diffFromGMT, startDate) AS startDate,
+               dateadd( hour, @diffFromGMT, endDate) AS endDate,
+               type, allDay, repeat, capacity, pendingApproval,
+               URL, description
+          FROM calendar e
+          WHERE startDate >= @fromDate
+          AND   type = @type
+          AND   e.pendingApproval = 0
+        ORDER BY dateadd( hour, @diffFromGMT, startDate) ASC
+      END
+    /* specific event type, from and to date range */
+      ELSE BEGIN
+        SELECT @toDate = dateadd( hour, (-1) * @diffFromGMT, @toDate )
+        SELECT e.eventID,
+               dateadd( hour, @diffFromGMT, startDate) AS startDate,
+               dateadd( hour, @diffFromGMT, endDate) AS endDate,
+               type, allDay, repeat, capacity, pendingApproval,
+               URL, description
+          FROM calendar e
+            WHERE type = @type
+            AND ((startDate BETWEEN @fromDate AND @toDate)
+             OR  (endDate BETWEEN @fromDate AND @toDate)
+             OR  ((startDate < @fromDate) AND (endDate > @toDate)))
+            AND   e.pendingApproval = 0
+        ORDER BY dateadd( hour, @diffFromGMT, startDate) ASC
+      END
+    END
+  END
+END
+GO
+GRANT EXECUTE ON getCalendar TO vpusr
+GO
+IF OBJECT_ID('dbo.getCalendar') IS NOT NULL
+	PRINT '<<< CREATED PROCEDURE dbo.getCalendar >>>'
+ELSE
+	PRINT '<<< FAILED CREATING PROCEDURE dbo.getCalendar >>>'
+GO

@@ -1,0 +1,23 @@
+/*
+ * History of space and bandwidth usage for User-created home pages.
+ *
+ */
+CREATE TABLE homePageHistory
+(
+	homePageStatsID	userIdentifier			IDENTITY
+                        	constraint isPrimary primary key,
+	userID		userIdentifier			NOT NULL,
+	statsDate	VpTime				NOT NULL,
+	megsTransferred	int	DEFAULT 0		NOT NULL,
+	bytesTransferred	int	DEFAULT 0	NOT NULL,
+-- when bytesTransferred passes 1024*1024, megsTransferred
+-- is incremented and bytesTransferred is reset.
+	webHits		int	DEFAULT 0		NOT NULL,
+	pageViews	int	DEFAULT 0		NOT NULL,
+	bytesUsed	int	DEFAULT 0		NOT NULL
+)
+GO
+GRANT SELECT ON homePageHistory TO PUBLIC
+GO
+GRANT UPDATE ON homePageHistory TO vpusr
+GO

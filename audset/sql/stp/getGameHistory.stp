@@ -1,0 +1,34 @@
+/*
+ * Get history for a specific game
+ */
+IF EXISTS
+ (SELECT name FROM sysobjects WHERE name = 'getGameHistory' AND type = 'P') 
+ DROP PROC getGameHistory
+GO  
+CREATE PROC getGameHistory (
+	@notifyID userIdentifier,
+	@gameID   integer
+)
+AS
+BEGIN
+  IF NOT EXISTS (SELECT * FROM gameResultsPri
+			WHERE notifyID = @notifyID)
+  AND NOT EXISTS (SELECT * FROM abandonedGames
+			WHERE notifyID = @notifyID)
+      RETURN 1
+
+  SELECT 'Y' AS completed, gameID, nickName, slot, score, whenPlayed, gameTypeID, p.resultID
+    FROM gameResultsPri p, gameResultsSec s, vpusers..users u
+    WHERE notifyID   = @notifyID
+    AND   p.resultID = s.resultID
+    AND   s.userID   = u.userID
+    AND   gameID     = @gameID
+  UNION
+  SELECT 'N' AS completed, gameID, nickName, slot, quitter, whenPlayed, gameTypeID, 0 AS resultID
+    FROM abandonedGames g, vpusers..users u
+    WHERE notifyID = @notifyID
+    AND   gameID   = @gameID
+    AND   g.userID = u.userID
+    AND   gameID   = @gameID
+END
+GO

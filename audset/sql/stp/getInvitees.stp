@@ -1,0 +1,15 @@
+/* Gets all invited guest for an event from the invitees table */
+/* input:  eventId
+   output: list of invitees with the fields:
+   invited guest name, registration mode 
+*/
+CREATE PROC getInvitees
+(
+  @eventID		eventIdentifier
+)
+AS
+  SELECT inviteeName, regMode
+    FROM eventInvitees
+    WHERE eventID = @eventID
+
+GO

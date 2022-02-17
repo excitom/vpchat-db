@@ -1,0 +1,33 @@
+/*
+ * Game ladders
+ *
+ * Game ladders are a superset of notify lists (a.k.a. alert lists).
+ *
+ */
+CREATE TABLE ladders
+(
+	notifyID	userIdentifier	
+                        	CONSTRAINT isPrimary PRIMARY KEY,
+	ladderName	longName		NOT NULL
+				CONSTRAINT uniqueDescr UNIQUE,
+	imageURL	longName		NULL,
+	gameTypeID	userIdentifier		NOT NULL,
+	createdDate	VpTime			NOT NULL,
+	-- zero implies unlimited
+	maxPlayers	int	DEFAULT 0	NOT NULL,
+	-- decay rate can be used to systematically drop 
+	-- a player's ranking due to inactivity.
+	decayRate	int	DEFAULT 0	NOT NULL,
+	decayInterval	int	DEFAULT 0	NOT NULL,
+	-- gain percentage defines how much of the favorite's 
+	-- rank a winning underdog gains.
+	gainPercentage	int	DEFAULT 50	NOT NULL,
+	-- challenge range can limit how high up the ladder
+	-- a player may challenge another player.
+	challengeRange	int	DEFAULT 100	NOT NULL,
+	closed		bit,
+	loserRankOpt	bit
+	-- 0 = "yahoo rules"
+	-- 1 = "case's rules"
+)
+GO

@@ -1,0 +1,16 @@
+CREATE VIEW historyWithNames
+AS
+  SELECT penaltyID AS Id,
+         users.nickName AS Name, users.registrationMode AS Mode,
+         description AS Penalty,
+         issuedOn,
+         u1.nickName AS issuer,
+         u1.registrationMode AS issuerMode,
+         forgiven,
+         expiresOn,
+         comment
+  FROM history, penaltyTypes, users, users u1
+  WHERE history.penaltyType = penaltyTypes.penaltyType AND
+        history.userID = users.userID AND
+        history.issuedBy = u1.userID
+GO

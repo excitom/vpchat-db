@@ -1,0 +1,98 @@
+#!/bin/sh
+
+# This script does the restoration of VpDatabases from full backup
+
+########################
+# GET INPUT PARAMETERS #
+########################
+SybaseRoot=$1
+shift
+ServicesRoot=$1
+shift
+DbName=$1
+shift
+DbOwner=$1
+shift
+DbOwnerPassword=$1
+shift
+saLogin=$1
+shift
+saPassword=$1
+shift
+dataServer=$1
+shift
+databaseSize=$1
+shift
+logSize=$1
+shift
+createDatabase=$1
+
+DbBackupDir=$SybaseRoot/db/backup
+SYBASE=$SybaseRoot
+export SYBASE
+
+if [ ! -f $DbBackupDir/$DbName.full ]
+then
+  echo "$DbBackupDir/$DbName.full was not found - cannot restore database $DbName"
+  exit
+fi
+
+echo
+echo "Restoring database $DbName"
+
+if [ $createDatabase -eq 1 ]
+then
+
+echo "Creating databse to restore into"
+$SybaseRoot/bin/isql -U$saLogin -P$saPassword -S$dataServer << !
+CREATE DATABASE $DbName ON VpDatabases = $databaseSize
+LOG ON VpDatabases_log = $logSize
+FOR LOAD
+GO
+!
+fi
+
+$SybaseRoot/bin/isql -U$saLogin -P$saPassword -S$dataServer << !
+LOAD DATABASE $DbName FROM "$DbBackupDir/$DbName.full"
+GO
+
+ONLINE DATABASE $DbName
+GO
+!
+
+if [ $createDatabase -eq 1 ]
+then
+$SybaseRoot/bin/isql -U$saLogin -P$saPassword -S$dataServer << !
+sp_dboption $DbName, "abort tran on log full", TRUE
+GO
+
+USE $DbName
+GO
+
+sp_changedbowner $DbOwner, TRUE
+GO
+
+sp_modifylogin $DbOwner, defdb, $DbName
+GO
+
+!
+fi
+
+setPermissionsScript=$ServicesRoot/$DbName/sql/sql/setPermissions.sql
+if [ -f $setPermissionsScript ]
+then
+  echo "Erasing old database user references"
+  $SybaseRoot/bin/isql -U$DbOwner -P$DbOwnerPassword -S$dataServer -i $ServicesRoot/dropUsers.sql | \
+   grep -v "(" | \
+   $SybaseRoot/bin/isql -U$DbOwner -P$DbOwnerPassword -S$dataServer
+  
+  echo "Restoring database user permissions"
+  $SybaseRoot/bin/isql -U$DbOwner -P$DbOwnerPassword -S$dataServer -i $setPermissionsScript
+fi
+
+$SybaseRoot/bin/isql -U$DbOwner -P$DbOwnerPassword -S$dataServer << !
+CHECKPOINT
+GO
+!
+
+echo

@@ -1,0 +1,14 @@
+CREATE TABLE registration
+(
+	userID			userIdentifier			NOT NULL
+                        	constraint isPrimary primary key,
+	email			longName			NULL,
+	password		VPPassword			NULL,
+	registrationDate	VpTime				NOT NULL,
+	lastSignOnDate		VpTime				NULL,
+	deleteDate		VpTime				NULL,
+	accountID		userIdentifier			NULL
+)
+GO
+GRANT SELECT ON registration TO vpplaces
+GO

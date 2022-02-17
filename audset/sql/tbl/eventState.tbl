@@ -1,0 +1,12 @@
+CREATE TABLE eventState
+(
+	eventID		eventIdentifier			NOT NULL,
+	stateID		stateIdentifier			NOT NULL,
+	name  		varchar(16)			NOT NULL,
+	time        	VpTime				NOT NULL,
+	welcomeMsg1	longName			NULL,
+	welcomeMsg2	longName			NULL,
+	PTGtitle	longName			NULL,
+		PRIMARY KEY ( eventID, stateID )
+)
+GO

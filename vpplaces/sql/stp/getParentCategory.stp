@@ -1,0 +1,19 @@
+/* get the id and name of the 
+   parent category of a specific category */
+/*
+  INPUT  : category id (assumed to belong to 
+                        an existing category)
+  OUTPUT : parent category id, parent category name
+*/
+CREATE PROC getParentCategory
+(
+  @category categoryIdentifier
+)
+AS
+BEGIN
+  SELECT c1.category, c1.description
+    FROM categories c1, categories c2
+    WHERE ( c2.category = @category ) AND
+          ( c1.category = c2.parentCategeory )
+END
+GO 

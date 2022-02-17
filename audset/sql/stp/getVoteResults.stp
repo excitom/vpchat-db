@@ -1,0 +1,62 @@
+/* Calculates vote results from the user selectiosn in the userVotes table */
+/* input:  voteID. 
+   output: a list of option results as follows - 
+           option, numSelections, percent 
+           + totals.
+*/
+CREATE PROC getVoteResults
+(
+  @voteID		numeric(10,0)
+)
+AS
+BEGIN
+  DECLARE @total int
+  DECLARE @num   int
+  DECLARE @eventState int
+  DECLARE @lastError int
+
+  /* Check event state: if event is over, get numbers from voteOptions table.
+     Otherwise, get numbers from userVotes table */
+  SELECT @eventState = currentState
+    FROM events, eventVotes
+    WHERE voteID = @voteID AND
+          events.eventID = eventVotes.eventID
+  SELECT @lastError = @@error
+  IF @lastError != 0
+    RETURN @lastError
+  IF @eventState = 3
+  BEGIN    /* Get results from voteOptions table */
+    SELECT @total = sum(totalSelections)
+      FROM voteOptions
+      WHERE voteID = @voteID
+    IF @total = 0
+      SELECT @total = 1 /* To avoid divide by 0, all results should be 0 */
+    SELECT label, totalSelections, (convert(real, totalSelections) / @total) * 100
+      FROM voteOptions
+      WHERE voteID = @voteID
+      ORDER BY label
+  END
+  ELSE BEGIN    /* Get results from userVotes table */
+    SELECT @total = count(*)
+      FROM userVotes
+      WHERE voteID = @voteID
+    IF @total = 0
+      SELECT @total = 1 /* To avoid divide by 0, all results should be 0 */
+    
+    SELECT DISTINCT label, optionID
+      INTO #voteOptions
+      FROM voteOptions
+      WHERE voteID = @voteID 
+          
+     
+    SELECT  label, count(userVotes.optionID), 
+           (convert(real,count(userVotes.optionID)) / @total) * 100
+      FROM userVotes, #voteOptions
+      WHERE userVotes.voteID = @voteID AND
+            #voteOptions.optionID = userVotes.optionID 
+      GROUP BY ALL label
+      ORDER BY label
+  END
+
+END
+GO

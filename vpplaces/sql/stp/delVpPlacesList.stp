@@ -1,0 +1,10 @@
+/* del all items from number and up */
+CREATE PROC delVpPlacesList
+(
+@serialNumber integer
+)
+AS
+  DELETE
+    FROM vpPlacesList
+    WHERE serialNumber >= @serialNumber
+GO 

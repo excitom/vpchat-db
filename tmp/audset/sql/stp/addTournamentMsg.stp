@@ -1,0 +1,183 @@
+/*
+ * Add a message event to a notify list. The message will be propagated
+ * to the subscribers at the scheduled time of the event.
+ *
+ * This is a special purpose function to be used when posting tournament
+ * results. A canned message is generated. Message frequency limits are
+ * not checked since a human is not iniating this message -- it's auto-
+ * generated as a result of tournament activity.
+ *
+ * Input: tournID, list ID, message type, winner(s)
+ *
+ *  Type: 0 = game results
+ *        1 = round ended, some games may not be complete
+ *        2 = tournament ended
+ *        3 = round started
+ *        4 = tournament cancelled
+ *        5 = prize awarded
+ *        6 = round ended, all games complete
+ *        7 = swiss tournament ended, tie for winner
+ *        8 = player joined the tournament
+ *        9 = player resigned
+ *        10 = TD removed a player
+ */
+IF EXISTS
+ (SELECT name FROM sysobjects WHERE name = 'addTournamentMsg' AND type = 'P') 
+ DROP PROC addTournamentMsg
+GO  
+CREATE PROC addTournamentMsg (
+	@tournID	userIdentifier,
+        @round		int,
+	@type		tinyint,
+	@player1	VPuserID = NULL,
+	@player2	VPuserID = NULL
+)
+AS
+BEGIN
+  DECLARE @lastError	int
+  DECLARE @time		VpTime
+  DECLARE @diffFromGMT 	int
+  DECLARE @message	longName
+  DECLARE @title	longName
+  DECLARE @notifyID	userIdentifier
+
+  SELECT @diffFromGMT = gmt
+    FROM vpusers..getGMT
+  IF @diffFromGMT IS NULL
+    SELECT @diffFromGMT = 0
+
+    
+  SELECT @time = dateadd( hour, (-1) * @diffFromGMT, getdate() )
+  SELECT @message = NULL
+    
+  SELECT @title = title, @notifyID = notifyID
+    FROM tournaments
+    WHERE tournID = @tournID
+
+  SELECT @lastError = @@error
+  IF @lastError != 0
+  BEGIN
+    RETURN @lastError
+  END
+
+  IF @title IS NULL OR @title = ''
+  BEGIN
+    SELECT @title = ladderName
+      FROM ladders
+      WHERE notifyID = @notifyID
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      RETURN @lastError
+    END
+  END
+
+-- select @type
+  /*
+   * Game or Tournament Winner message
+   */
+  IF @type = 0 OR @type = 2
+  BEGIN
+    IF char_length(@title) > 80
+    BEGIN
+      SELECT @title = substring(@title, 1, 80)
+    END
+
+    IF @type = 0
+      SELECT @message = @title + ' round ' + convert(char(3), @round) + ' game over, WINNER: ' + @player1
+    ELSE
+      SELECT @message = @title + ' tournament over, CHAMPION: ' + @player1
+    
+    IF @player2 IS NOT NULL
+    BEGIN
+      SELECT @message = @message + ' and ' + @player2
+    END
+  END
+    
+  /*
+   * Round Completed message
+   */
+  IF @type = 1
+  BEGIN
+    SELECT @message = @title + ' ROUND ' + convert(char(3), @round) + ' ENDED. The TD will declare a winner for any games not yet completed.'
+  END
+    
+  /*
+   * Round Started message
+   */
+  IF @type = 3
+  BEGIN
+    SELECT @message = @title + ' ROUND ' + convert(char(3), @round) + ' STARTED.'
+  END
+    
+  /*
+   * Tournament cancelled
+   */
+  IF @type = 4
+  BEGIN
+    SELECT @message = @title + ' CANCELLED'
+  END
+    
+  /*
+   * Prize awarded
+   */
+  IF @type = 5
+  BEGIN
+    SELECT @message = @title + ' prize awarded, ' + convert(char(8), @round) + ' chits.'
+  END
+    
+  /*
+   * Round Completed message (ver 2)
+   */
+  IF @type = 6
+  BEGIN
+    SELECT @message = @title + ' ROUND ' + convert(char(3), @round) + ' ENDED. All games were completed.'
+  END
+    
+  /*
+   * Swiss tournament ended, tie for winner
+   */
+  IF @type = 7
+  BEGIN
+    SELECT @message = @title + ' all players have at least one loss, and there is a tie for high points.'
+  END
+    
+  /*
+   * Player joined
+   */
+  IF @type = 8
+  BEGIN
+    SELECT @message = @title + ', ' + @player1 + ' is registered.'
+  END
+    
+  /*
+   * Player resigned
+   */
+  IF @type = 9
+  BEGIN
+    SELECT @message = @title + ', ' + @player1 + ' resigned.'
+  END
+    
+  /*
+   * Player removed
+   */
+  IF @type = 10
+  BEGIN
+    SELECT @message = @title + ', ' + @player1 + ' was removed by the TD.'
+  END
+
+-- select 'MESSAGE', @message
+  IF @message IS NOT NULL
+  BEGIN
+    INSERT notifyEvents (notifyID, tournID, userID, accountID, time, message)
+      VALUES (@notifyID, @tournID, 1, 1, @time, @message)
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      RETURN @lastError
+    END
+  END
+END
+GO

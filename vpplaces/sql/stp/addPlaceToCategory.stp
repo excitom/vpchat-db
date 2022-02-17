@@ -1,0 +1,71 @@
+/* add a place under a category */
+/*
+  INPUT  : parent category, new place URL, domainFlag
+  OUTPUT : return value - 0 if successful
+                          20001 if given category does not exist
+                          20002 if given place is already defined 
+                                for this category
+*/
+CREATE PROC addPlaceToCategory
+(
+  @parentCategory categoryIdentifier,
+  @URL UrlType,
+  @domainFlag bit = 1
+)
+AS
+BEGIN
+  DECLARE @lastError int
+  DECLARE @category categoryIdentifier
+  DECLARE @oldPlace UrlType
+  
+  BEGIN TRAN addPlaceToCategory
+    SELECT @category = category
+      FROM categories
+      WHERE ( category = @parentCategory )
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN addPlaceToCategory
+      RETURN @lastError
+    END
+    
+    IF ( @category IS NULL )
+    BEGIN
+      ROLLBACK TRAN addPlaceToCategory
+      RETURN 20001
+    END
+    
+    SELECT @oldPlace = URL
+      FROM placeCategories
+      WHERE ( category = @parentCategory ) AND
+            ( URL = @URL )
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN addPlaceToCategory
+      RETURN @lastError
+    END
+    
+    IF ( @oldPlace IS NOT NULL )
+    BEGIN
+      ROLLBACK TRAN addPlaceToCategory
+      RETURN 20002
+    END
+    
+    INSERT placeCategories ( category, URL, domainFlag )
+      VALUES ( @parentCategory, @URL, @domainFlag )    
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN addPlaceToCategory
+      RETURN @lastError
+    END
+    
+  COMMIT TRAN addPlaceToCategory
+END
+GO 
+GRANT EXECUTE ON addPlaceToCategory TO vpusr
+GO

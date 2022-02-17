@@ -1,0 +1,16 @@
+/* set the current state of an event */
+/* input:  event id, new state id
+   output: NONE
+*/
+CREATE PROC setEventState
+(
+  @eventID numeric(10,0), 
+  @newState numeric(4,0)
+)
+AS
+BEGIN
+  UPDATE events
+    SET currentState = @newState
+    WHERE events.eventID = @eventID
+END
+GO

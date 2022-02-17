@@ -1,0 +1,91 @@
+/*
+ * Update a game ladder
+ *
+ * Output: 0 = success
+ *         20001 = unknown ladder
+ *         20005 = invalid account status for this action
+ */
+CREATE PROC updateLadder ( 
+	@notifyID	userIdentifier,
+	@subheader	longName,
+	@URL		longName = NULL,
+	@imageURL	longName = NULL,
+	@unlisted	bit = 0,
+	@approvalRqd	bit = 0,
+	@adultContent	bit = 0,
+	@closed	        bit = 0,
+	@loserRankOpt	bit = 0
+)
+AS
+BEGIN
+  DECLARE @lastError	int
+  DECLARE @nid		userIdentifier
+  DECLARE @descr	longName
+  DECLARE @deleted	bit
+
+  /* Remove extraneous white space from strings */
+
+  SELECT @subheader = ltrim(@subheader)
+  SELECT @URL         = ltrim(@URL)
+  SELECT @imageURL    = ltrim(@imageURL)
+  SELECT @subheader = rtrim(@subheader)
+  SELECT @URL         = rtrim(@URL)
+  SELECT @imageURL    = rtrim(@imageURL)
+
+  BEGIN TRAN
+
+    SELECT @nid = notifyID
+      FROM notifyLists
+      WHERE notifyID = @notifyID
+      AND deleted = 0
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    IF @nid IS NULL
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20001
+    END
+
+    UPDATE notifyLists 
+      SET subheader = @subheader
+      WHERE notifyID = @notifyID
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    UPDATE privateLists 
+      SET URL = @URL, unlisted = @unlisted, approvalRqd = @approvalRqd, adultContent = @adultContent
+      WHERE notifyID = @notifyID
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    UPDATE ladders SET imageURL = @imageURL,
+			closed = @closed,
+			loserRankOpt = @loserRankOpt
+		WHERE notifyID = @notifyID
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+  COMMIT TRAN
+END
+GO

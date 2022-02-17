@@ -1,0 +1,14 @@
+CREATE VIEW remindersWithNames
+AS
+  SELECT reminderID,
+         reminders.accountID AS targetAcctID,
+	 users.nickName AS targetName,
+         u1.nickName AS notifyName,
+         a1.email AS notifyEmail,
+         notifyDate, repCount, interval, comment
+  FROM reminders, userAccounts, users, userAccounts a1, users u1
+  WHERE reminders.accountID = userAccounts.accountID
+  AND   userAccounts.ownerID = users.userID
+  AND   reminders.notifyAcctID = a1.accountID
+  AND   a1.ownerID = u1.userID
+GO

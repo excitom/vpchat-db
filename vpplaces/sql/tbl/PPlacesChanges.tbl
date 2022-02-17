@@ -1,0 +1,7 @@
+CREATE TABLE persistentPlacesChange
+(
+	time		VpTime				NOT NULL,
+	URL		longName			NOT NULL,
+	change		char(1)				NOT NULL
+)
+GO

@@ -1,0 +1,21 @@
+/* 
+ * Find user created room for an account
+ *
+ * Input: Account ID
+ *
+ */
+IF EXISTS(SELECT name FROM sysobjects WHERE name='getUserPlacesByAcct' AND type='P')
+ DROP PROC getUserPlacesByAcct
+GO
+CREATE PROC getUserPlacesByAcct (
+  @accountID	userIdentifier,
+  @tournaments	bit = 0
+)
+AS
+BEGIN
+  SELECT URL, title, roomCapacity, category
+    FROM userPlaces
+    WHERE accountID = @accountID
+    AND  tournament = @tournaments
+END
+GO

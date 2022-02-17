@@ -1,0 +1,263 @@
+/*
+ * Compute per-account averages for a variety of stats categories
+ */
+CREATE PROC getAvgStats (
+  @attr VARCHAR(20),
+  @activeOnly bit = 0,
+  @includeNew bit = 0	/* applicable only if activeOnly = 0 */
+)
+AS
+BEGIN
+  DECLARE @accounts INTEGER
+  DECLARE @counter INTEGER
+  /*
+   * first get total accounts, depending on scope
+   *   (active, all, or all+new)
+   */
+  IF @activeOnly = 1
+  BEGIN
+    SELECT @accounts = COUNT(userAccounts.accountID)
+      FROM userAccounts, renewals
+      WHERE userAccounts.accountID=renewals.accountID
+      AND accountType > 0
+      AND accountStatus = 0
+  END
+  ELSE BEGIN
+    IF @includeNew = 1
+    BEGIN
+      SELECT @accounts = COUNT(userAccounts.accountID)
+        FROM userAccounts, renewals
+        WHERE userAccounts.accountID=renewals.accountID
+        AND accountType > 0
+    END
+    ELSE BEGIN
+      SELECT @accounts = COUNT(userAccounts.accountID)
+        FROM userAccounts, renewals
+        WHERE userAccounts.accountID=renewals.accountID
+        AND accountStatus != 1
+        AND accountType > 0
+    END
+  END
+  /*
+   * get per-account total based on stat category
+   */
+  DECLARE @unknown bit
+  SELECT  @unknown = 1
+
+  IF @attr = 'months'
+  BEGIN
+    SELECT @unknown = 0
+    IF @activeOnly = 1
+    BEGIN
+      SELECT @counter = SUM(months)
+        FROM userAccounts, renewals
+        WHERE userAccounts.accountID=renewals.accountID
+        AND accountStatus = 0
+        AND accountType > 0
+    END
+    ELSE BEGIN
+      IF @includeNew = 1
+      BEGIN
+        SELECT @counter = SUM(months)
+          FROM userAccounts, renewals
+          WHERE userAccounts.accountID=renewals.accountID
+          AND accountType > 0
+      END
+      ELSE BEGIN
+        SELECT @counter = SUM(months)
+          FROM userAccounts, renewals
+          WHERE userAccounts.accountID=renewals.accountID
+          AND accountStatus != 1
+          AND accountType > 0
+      END
+    END
+  END
+  IF @attr = 'renewals'
+  BEGIN
+    SELECT @unknown = 0
+    IF @activeOnly = 1
+    BEGIN
+      SELECT @counter = SUM(renewals)
+        FROM userAccounts, renewals
+        WHERE userAccounts.accountID=renewals.accountID
+        AND accountStatus = 0
+        AND accountType > 0
+    END
+    ELSE BEGIN
+      IF @includeNew = 1
+      BEGIN
+        SELECT @counter = SUM(renewals)
+          FROM userAccounts, renewals
+          WHERE userAccounts.accountID=renewals.accountID
+          AND accountType > 0
+      END
+      ELSE BEGIN
+        SELECT @counter = SUM(renewals)
+          FROM userAccounts, renewals
+          WHERE userAccounts.accountID=renewals.accountID
+          AND accountStatus != 1
+          AND accountType > 0
+      END
+    END
+  END
+  IF @attr = 'upgrades'
+  BEGIN
+    SELECT @unknown = 0
+    IF @activeOnly = 1
+    BEGIN
+      SELECT @counter = SUM(upgrades)
+        FROM userAccounts, renewals
+        WHERE userAccounts.accountID=renewals.accountID
+        AND accountStatus = 0
+        AND accountType > 0
+    END
+    ELSE BEGIN
+      IF @includeNew = 1
+      BEGIN
+        SELECT @counter = SUM(upgrades)
+          FROM userAccounts, renewals
+          WHERE userAccounts.accountID=renewals.accountID
+          AND accountType > 0
+      END
+      ELSE BEGIN
+        SELECT @counter = SUM(upgrades)
+          FROM userAccounts, renewals
+          WHERE userAccounts.accountID=renewals.accountID
+          AND accountStatus != 1
+          AND accountType > 0
+      END
+    END
+  END
+  IF @attr = 'namesAdded'
+  BEGIN
+    SELECT @unknown = 0
+    IF @activeOnly = 1
+    BEGIN
+      SELECT @counter = SUM(namesAdded)
+        FROM userAccounts, renewals
+        WHERE userAccounts.accountID=renewals.accountID
+        AND accountStatus = 0
+        AND accountType > 0
+    END
+    ELSE BEGIN
+      IF @includeNew = 1
+      BEGIN
+        SELECT @counter = SUM(namesAdded)
+          FROM userAccounts, renewals
+          WHERE userAccounts.accountID=renewals.accountID
+          AND accountType > 0
+      END
+      ELSE BEGIN
+        SELECT @counter = SUM(namesAdded)
+          FROM userAccounts, renewals
+          WHERE userAccounts.accountID=renewals.accountID
+          AND accountStatus != 1
+          AND accountType > 0
+      END
+    END
+  END
+  IF @attr = 'wentOverdue'
+  BEGIN
+    SELECT @unknown = 0
+    IF @activeOnly = 1
+    BEGIN
+      SELECT @counter = SUM(wentOverdue)
+        FROM userAccounts, renewals
+        WHERE userAccounts.accountID=renewals.accountID
+        AND accountStatus = 0
+        AND accountType > 0
+    END
+    ELSE BEGIN
+      IF @includeNew = 1
+      BEGIN
+        SELECT @counter = SUM(wentOverdue)
+          FROM userAccounts, renewals
+          WHERE userAccounts.accountID=renewals.accountID
+          AND accountType > 0
+      END
+      ELSE BEGIN
+        SELECT @counter = SUM(wentOverdue)
+          FROM userAccounts, renewals
+          WHERE userAccounts.accountID=renewals.accountID
+          AND accountStatus != 1
+          AND accountType > 0
+      END
+    END
+  END
+  IF @attr = 'names'
+  BEGIN
+    SELECT @unknown = 0
+    IF @activeOnly = 1
+    BEGIN
+      SELECT @counter = COUNT(userID)  
+        FROM userAccounts,registration
+        WHERE userAccounts.accountID=registration.accountID
+        AND accountStatus = 0
+        AND accountType > 0
+    END
+    ELSE BEGIN
+      IF @includeNew = 1
+      BEGIN
+        SELECT @counter = COUNT(userID)
+          FROM userAccounts,registration
+          WHERE userAccounts.accountID=registration.accountID
+          AND accountType > 0
+      END
+      ELSE BEGIN
+        SELECT @counter = COUNT(userID)
+          FROM userAccounts,registration
+          WHERE userAccounts.accountID=registration.accountID
+          AND accountStatus != 1
+          AND accountType > 0
+      END
+    END
+  END
+  IF @attr = 'payments'
+  BEGIN
+    SELECT @unknown = 0
+    IF @activeOnly = 1
+    BEGIN
+      SELECT @counter = COUNT(payments.paymentID)  
+        FROM userAccounts,payments,ccPayments
+        WHERE userAccounts.accountID=payments.accountID
+        AND payments.paymentID=ccPayments.paymentID
+        AND pmtType > 0
+        AND accountStatus = 0
+        AND accountType > 0
+        AND amount > 0
+    END
+    ELSE BEGIN
+      IF @includeNew = 1
+      BEGIN
+        SELECT @counter = COUNT(payments.paymentID)
+          FROM userAccounts,payments,ccPayments
+          WHERE userAccounts.accountID=payments.accountID
+          AND payments.paymentID=ccPayments.paymentID
+          AND pmtType > 0
+          AND accountType > 0
+          AND amount > 0
+      END
+      ELSE BEGIN
+        SELECT @counter = COUNT(payments.paymentID)
+          FROM userAccounts,payments,ccPayments
+          WHERE userAccounts.accountID=payments.accountID
+          AND payments.paymentID=ccPayments.paymentID
+          AND pmtType > 0
+          AND accountStatus != 1
+          AND accountType > 0
+          AND amount > 0
+      END
+    END
+  END
+
+  IF @unknown = 1
+  BEGIN
+    SELECT -1, @attr, ' is not a valid attribute'
+    RETURN 20001
+  END
+
+  DECLARE @rate FLOAT
+  SELECT @rate = CONVERT(FLOAT, @counter) / CONVERT(FLOAT, @accounts)
+  SELECT @rate
+END
+GO

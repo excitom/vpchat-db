@@ -1,0 +1,121 @@
+/* delete a category - related data will be 
+   removed by the delCategoryData trigger 
+   NOTE: to avoid having to do a recursive call to
+   the trigger (which is limited to up to 16 levels),
+   sub-categories are deleted gradually here by 
+   collecting them in a temporary table
+*/
+/*
+  INPUT  : category ID
+  OUTPUT : NONE
+*/
+CREATE PROC delCategory
+(
+  @category categoryIdentifier
+)
+AS
+BEGIN
+  CREATE TABLE #subCategories
+  (
+    category	numeric(10,0)		NOT NULL,
+    nestLevel	int			NOT NULL
+  )
+  DECLARE @lastError int
+  DECLARE @nestingLevel int
+  DECLARE @rowsAdded int
+  SELECT @nestingLevel = 0
+  
+  BEGIN TRAN delCategory
+  /* find all sub-categories */
+
+  /* find all sub-categories which are
+     in the first level                */
+  INSERT #subCategories
+    VALUES ( @category, @nestingLevel )
+  
+      
+  SELECT @lastError = @@error
+  IF @lastError != 0
+  BEGIN
+    ROLLBACK TRAN delCategory
+    RETURN @lastError
+  END
+  
+  SELECT @rowsAdded = 1
+  WHILE ( @rowsAdded > 0 )
+  BEGIN
+    SELECT @nestingLevel = @nestingLevel + 1
+    /* find the sub-categories in the next level */
+    INSERT #subCategories
+      SELECT c.category, @nestingLevel
+      FROM categories c, #subCategories sc
+      WHERE ( sc.nestLevel = @nestingLevel-1 ) AND
+            ( c.parentCategeory = sc.category )
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN delCategory
+      RETURN @lastError
+    END
+    
+    SELECT @rowsAdded = count(*)
+      FROM #subCategories
+      WHERE nestLevel = @nestingLevel
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN delCategory
+      RETURN @lastError
+    END
+    
+  END /* WHILE ( @rowsAdded > 0 ) */
+
+  
+  /* delete all the place related 
+     to any of the sub-categories found */
+  DELETE placeCategories
+    FROM placeCategories pc, #subCategories sc
+    WHERE ( pc.category = sc.category )
+  
+  SELECT @lastError = @@error
+  IF @lastError != 0
+  BEGIN
+    ROLLBACK TRAN delCategory
+    RETURN @lastError
+  END
+  
+  /* now, go over all sub-categories that were
+     put in the temporary table and delete them
+     from the categories table                  */
+  
+  WHILE ( @nestingLevel > 0 ) 
+  BEGIN
+    SELECT @nestingLevel = @nestingLevel - 1
+    DELETE categories
+      FROM categories c, #subCategories sc
+      WHERE ( sc.nestLevel = @nestingLevel ) AND
+            ( c.category = sc.category )
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN delCategory
+      RETURN @lastError
+    END
+  END
+  
+  /* empty the temporary table */
+  DELETE #subCategories
+  
+  SELECT @lastError = @@error
+  IF @lastError != 0
+  BEGIN
+    ROLLBACK TRAN delCategory
+    RETURN @lastError
+  END
+  
+  COMMIT TRAN delCategory
+END
+GO 

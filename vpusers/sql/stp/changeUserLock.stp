@@ -1,0 +1,80 @@
+/* change user lock flag */
+/* input:  nickName, flag
+
+   In addition to the funtion of updateUserLock, this procedure
+   checks the account status.
+
+   Why two procedures? This one is for the end users. We don't 
+   want them to be able to unlock names if we've locked out their
+   account.
+
+   output: Return value - 0 - success 
+                          20001 - No such user
+                          20002 - not allowed due to account status
+*/
+CREATE PROC changeUserLock ( @nickName VPuserID, @lockFlag tinyInt )
+AS
+BEGIN
+  DECLARE @lastError int
+  DECLARE @aid userIdentifier
+  DECLARE @accountStatus int
+  DECLARE @userID userIdentifier
+
+  /* turn all user ID to lower case, to get case insensitive comparisons */
+  SELECT @nickName = lower(@nickName)
+  SELECT @nickName = ltrim(@nickName)
+
+  /* sanity check */
+  IF @lockFlag > 1
+  BEGIN
+    SELECT @lockFlag = 1
+  END
+  
+    SELECT @aid = accountID, @userID = registration.userID
+      FROM registration, users
+      WHERE nickName = @nickName
+      AND   users.userID=registration.userID
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      RETURN @lastError
+    END
+
+    IF @aid IS NULL
+    BEGIN
+      RETURN 20001
+    END
+
+    SELECT @accountStatus = accountStatus
+      FROM userAccounts
+      WHERE accountID = @aid
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      RETURN @lastError
+    END
+
+    IF @accountStatus IS NULL
+    BEGIN
+      RETURN 20001
+    END
+
+    IF @accountStatus != 0
+      AND @accountStatus != 2
+    BEGIN
+      RETURN 20002
+    END
+    
+    EXEC vpusers..updateUserLock @userID, @lockFlag, @nickName
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      RETURN @lastError
+    END
+
+  RETURN 0
+END
+GO

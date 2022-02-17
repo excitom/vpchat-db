@@ -1,0 +1,136 @@
+/* --- For a given event, return for each
+   interaction type, the total number of 
+   interactions of that type, the number of 
+   interactions currently processed by the 
+   requesting host and by others, 
+   and the number of interactions broadcasted
+   by the requesting host and by others.
+*/
+/* input:  event id, hostName
+output: for each interaction type, the following fields:
+        interaction name, total#, idle#,
+        processed by host, processed by others,
+        broadcasted by host, broadcasted by others, blocking status
+*/
+CREATE PROC getInteractionsNum
+(
+  @eventID     eventIdentifier,
+  @hostName    VPuserID
+)
+AS
+BEGIN
+   DECLARE @iType       numeric(2,0)
+   DECLARE @iName       varchar(16)
+   DECLARE @iCount      integer
+   DECLARE @idleCount   integer
+   DECLARE @pHostCount  integer
+   DECLARE @pOtherCount integer
+   DECLARE @bHostCount  integer
+   DECLARE @bOtherCount integer
+   DECLARE @lastError   integer
+   DECLARE @blocked 	bit
+
+   DECLARE @IDLE        integer
+   DECLARE @LOCKED      integer
+   DECLARE @DELETED 	integer
+   DECLARE @FORWARDED   integer
+   DECLARE @ATGUEST     integer
+   DECLARE @READY	integer
+   DECLARE @BROADCASTED integer
+
+   SELECT @IDLE = 1
+   SELECT @LOCKED = 2
+   SELECT @DELETED = 3
+   SELECT @FORWARDED = 4
+   SELECT @ATGUEST = 5
+   SELECT @READY = 6
+   SELECT @BROADCASTED = 7
+
+   CREATE TABLE #Statistics (iName varchar(16), numInt integer, numIdle integer,
+                             numProcHost integer, numProcOthers integer,
+                             numBroadHost integer, numBroadOthers integer, blocked bit)
+
+   /* Get all interaction types for this event */
+   DECLARE interactionTypes CURSOR
+   FOR
+   SELECT interactionType, name, interactBlocked
+   FROM interactionsAllowed
+   WHERE eventID = @eventID
+   FOR READ ONLY
+   SELECT @lastError = @@error
+   IF @lastError != 0
+      RETURN @lastError
+   
+   /* For each interaction type, get all the numbers */
+   OPEN interactionTypes
+   FETCH interactionTypes INTO @iType, @iName, @blocked
+   WHILE ( @@sqlstatus = 0 )
+   BEGIN
+     SELECT @iCount = count(*)
+     FROM eventInteractions ( INDEX interactionsByEventIdx )
+     WHERE eventID = @eventID AND
+           interactionType = @iType AND
+           status != @DELETED
+     SELECT @lastError = @@error
+     IF @lastError != 0
+       RETURN @lastError
+          
+     SELECT @idleCount = count(*)
+     FROM eventInteractions ( INDEX interactionsByEventIdx )
+     WHERE eventID = @eventID AND
+           interactionType = @iType AND
+           status IN (@IDLE, @LOCKED)
+     SELECT @lastError = @@error
+     IF @lastError != 0
+       RETURN @lastError
+ 
+     SELECT @pHostCount = count(*)
+     FROM eventInteractions ( INDEX interactionsByEventIdx )
+     WHERE eventID = @eventID AND
+           interactionType = @iType AND
+           hostName = @hostName AND
+           status IN (@READY, @FORWARDED)
+     SELECT @lastError = @@error
+     IF @lastError != 0
+       RETURN @lastError
+ 
+     SELECT @pOtherCount = count(*)
+     FROM eventInteractions ( INDEX interactionsByEventIdx )
+     WHERE eventID = @eventID AND
+           interactionType = @iType AND
+           hostName != @hostName AND
+           status IN (@READY, @FORWARDED, @ATGUEST)
+     SELECT @lastError = @@error
+     IF @lastError != 0
+       RETURN @lastError
+
+     SELECT @bHostCount = count(*)
+     FROM eventInteractions ( INDEX interactionsByEventIdx )
+     WHERE eventID = @eventID AND
+           interactionType = @iType AND
+           hostName = @hostName AND
+           status = @BROADCASTED
+     SELECT @lastError = @@error
+     IF @lastError != 0
+       RETURN @lastError
+
+     SELECT @bOtherCount = count(*)
+     FROM eventInteractions ( INDEX interactionsByEventIdx )
+     WHERE eventID = @eventID AND
+           interactionType = @iType AND
+           hostName != @hostName AND
+           status = @BROADCASTED
+     SELECT @lastError = @@error
+     IF @lastError != 0
+       RETURN @lastError
+
+     INSERT INTO #Statistics 
+     VALUES(@iName, @iCount, @idleCount, @pHostCount, @pOtherCount, 
+            @bHostCount, @bOtherCount, @blocked)
+     FETCH interactionTypes INTO @iType, @iName, @blocked
+   END
+   CLOSE interactionTypes
+   SELECT * from #Statistics
+
+END
+GO

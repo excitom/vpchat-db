@@ -1,0 +1,23 @@
+CREATE TABLE userAccounts
+(
+	accountID		userIdentifier			NOT NULL
+                        	CONSTRAINT userAccountIDisPrimary PRIMARY KEY
+                        	CONSTRAINT userAccountRefToUsers REFERENCES users,
+	ownerID			userIdentifier			NOT NULL,
+	accountType		tinyInt				NOT NULL,
+	accountStatus		tinyInt				NOT NULL,
+	billingCycle		tinyInt				NOT NULL,
+	nameLimit		tinyInt				NOT NULL,
+	discount		float				NOT NULL,
+	unitCost		smallmoney			NOT NULL,
+	paymentStatus		tinyInt				NOT NULL,
+	enrolledReferrer	bit,
+	creationDate		VpTime				NOT NULL,
+	renewalDate		VpTime				NOT NULL,
+	lastUpdated		VpTime				NULL,
+	referredByID		userIdentifier			NULL,
+	referredBy		longName			NULL,
+	email			longName			NOT NULL
+)
+ON userDetailsSeg
+GO

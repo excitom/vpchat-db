@@ -1,0 +1,83 @@
+/* get the usage statistics for a given period of time, by week
+   NOTE: dailyUsage is used, so statistics are good only
+         up to the previous day
+
+  INPUT  : startTime, endTime
+  OUTPUT : time, 
+           summary values - ( all users, chat users, Buddy list users ) X 
+                            (average)
+
+           e.g. if summary is desired for period starting on 
+           January 1st 1997, and ending on December 31st 1997, values will look like this:
+
+           1996 12 29 00:00 <all-avg> <chat-avg> <bl-avg>
+           1997 1 5 00:00 <all-avg> <chat-avg> <bl-avg>
+           1997 1 12 00:00 <all-avg> <chat-avg> <bl-avg>
+            .   . . .       .        .
+            .   . . .       .        .
+            .   . . .       .        .
+            .   . . .       .        .
+            .   . . .       .        .
+           1997 12 28 00:00 <all-avg> <chat-avg> <bl-avg>
+
+           where each <braced value> is a 4-byte-representable integer.
+           note that the starting days for the respective weeks are used,
+           so that the data is correct for all of the regarded week. Therefore, in this
+           example, the first week used is the one starting on Dec 29, 1996, which includes
+           Jan 1, 1997.
+*/
+CREATE PROC getWeeklyAvgStatistics
+(
+  @startTime VpTime,
+  @endTime VpTime
+)
+AS
+BEGIN
+  /* first fix times to include each possible entry from the given weeks */
+  /* make @startTime be 00:00 of the first day on the week which @startTime belongs to */
+  SELECT @startTime = dateadd( day, 1 - datepart(weekday,@startTime), @startTime )
+  SELECT @startTime = dateadd( hour, (-1) * datepart(hour,@startTime), @startTime )
+  SELECT @startTime = dateadd( minute, (-1) * datepart(minute,@startTime), @startTime )
+  
+  /* make @endTime be 23:59 of the last day on the week which @endTime belongs to */
+  SELECT @endTime = dateadd( day, 7 - datepart(weekday,@endTime), @endTime )
+  SELECT @endTime = dateadd( hour, 23 - datepart(hour,@endTime), @endTime )
+  SELECT @endTime = dateadd( minute, 59 - datepart(minute,@endTime), @endTime )
+  
+  SELECT DISTINCT
+         year=datepart( year, dateadd( day, (-1) * (datepart(weekday,d1.time)-1), d1.time ) ),
+         month=datepart( month, dateadd( day, (-1) * (datepart(weekday,d1.time)-1), d1.time ) ),
+         day=datepart( day, dateadd( day, (-1) * (datepart(weekday,d1.time)-1), d1.time ) ),
+         hour=0, /* weekly summary, so hour is meaningless */
+         allAvg=avg(d1.value),
+         chatAvg=avg(d2.value),
+         BlAvg=avg(d3.value)
+  FROM
+         dailyUsage d1,
+         dailyUsage d2,
+         dailyUsage d3
+  WHERE	    
+         ( datepart( year, dateadd( day, 1 - datepart(weekday,d1.time), d1.time ) ) =
+             datepart( year, dateadd( day, 1 - datepart(weekday,d2.time), d2.time ) ) ) AND
+         ( datepart( week, dateadd( day, 1 - datepart(weekday,d1.time), d1.time ) ) =
+             datepart( week, dateadd( day, 1 - datepart(weekday,d2.time), d2.time ) ) ) AND
+         
+         ( datepart( year, dateadd( day, 1 - datepart(weekday,d2.time), d2.time ) ) =
+             datepart( year, dateadd( day, 1 - datepart(weekday,d3.time), d3.time ) ) ) AND
+         ( datepart( week, dateadd( day, 1 - datepart(weekday,d2.time), d2.time ) ) =
+             datepart( week, dateadd( day, 1 - datepart(weekday,d3.time), d3.time ) ) ) AND
+         
+         ( d1.time BETWEEN @startTime AND @endTime ) AND
+         ( d2.time BETWEEN @startTime AND @endTime ) AND
+         ( d3.time BETWEEN @startTime AND @endTime ) AND
+         (d1.userType=0) AND (d1.valueType=0) AND
+         (d2.userType=1) AND (d2.valueType=0) AND
+         (d3.userType=2) AND (d3.valueType=0)
+
+  GROUP BY datepart( year, dateadd( day, 1 - datepart(weekday,d1.time), d1.time ) ), 
+           datepart( week, dateadd( day, 1 - datepart(weekday,d1.time), d1.time ) )
+  ORDER BY year, month, day
+
+
+END
+GO 

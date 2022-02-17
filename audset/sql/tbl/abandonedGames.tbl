@@ -1,0 +1,17 @@
+/*
+ * Keep track of players who quit (or are booted from) ladder games
+ *
+ */
+CREATE TABLE abandonedGames
+(
+	gameID		integer			NOT NULL,
+	-- notifyID joins with the notifyLists, privateLists,
+	-- and ladders tables.
+	notifyID	userIdentifier		NOT NULL,
+	userID		userIdentifier		NOT NULL,
+	gameTypeID	userIdentifier		NOT NULL,
+	slot		tinyint			NOT NULL,
+	quitter		tinyint			NOT NULL,
+	whenPlayed	VpTime			NOT NULL
+)
+GO

@@ -1,0 +1,10 @@
+/* get allowed interactions for a specified event */
+/* input:  event id
+   output: list of allowed event types for that event
+*/
+CREATE PROC getEventInteractionTypes ( @eventID eventIdentifier )
+AS
+  SELECT interactionType, name, interactBlocked
+    FROM interactionsAllowed
+    WHERE eventID = @eventID
+GO

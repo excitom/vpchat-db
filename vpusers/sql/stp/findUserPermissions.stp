@@ -1,0 +1,70 @@
+/* find password for a given email
+   INPUT  : email
+   OUTPUT : list of passwords from the registration table
+            for entries with this email
+*/
+CREATE PROC findUserPermissions
+(
+  @userID userIdentifier, 
+  @updateSignDate bit = 1
+)
+AS
+BEGIN
+  --  set isolation level to 0
+  set transaction isolation level 0
+  
+  DECLARE @diffFromGMT int
+  DECLARE @thisTime VpTime
+  DECLARE @lastError int
+  
+  BEGIN TRAN findUserPermissions
+    
+    SELECT @diffFromGMT = gmt
+      FROM getGMT
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN checkUser
+      RETURN @lastError
+    END
+    
+    IF @diffFromGMT IS NULL
+      SELECT @diffFromGMT = 0
+    
+    SELECT @thisTime = dateadd( hour, (-1) * @diffFromGMT, getdate() )
+    
+    SELECT 1, penaltyType /* 1 to indicate that this is a penalty */
+      FROM penalties
+      WHERE ( penalties.userID = @userID ) AND
+            ( expiresOn > @thisTime )      AND
+            ( forgiven = 0 )
+    UNION
+    SELECT 0, privilegeType /* 0 marks this as privilege */
+      FROM userPrivileges
+      WHERE ( userPrivileges.userID = @userID )
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN findUserPermissions
+      RETURN @lastError
+    END
+
+    IF ( @updateSignDate = 1 )
+    BEGIN
+      /* mark the sign-on in the user's registration record */
+      UPDATE registration
+        SET lastSignOnDate = @thisTime
+        WHERE ( userID = @userID )
+      
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN findUserPermissions
+        RETURN @lastError
+      END
+    END
+  COMMIT TRAN findUserPermissions
+END
+GO 

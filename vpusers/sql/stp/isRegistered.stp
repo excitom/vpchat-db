@@ -1,0 +1,18 @@
+/* Check if a specific user is registered in the database */
+/* input: name, registration mode
+   output: @isRegistered parameter will be set to 1 if the user 
+   with this registration mode and nick
+   name is written in the database, 0 otherwise
+*/
+CREATE PROC isRegistered
+(
+  @name	VPuserID,
+  @regMode VpRegMode,
+  @isRegistered int output
+)
+AS
+SELECT @isRegistered = count(*)
+  FROM users
+  WHERE ( nickName = @name ) AND
+        ( registrationMode = @regMode )
+GO

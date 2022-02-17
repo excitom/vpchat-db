@@ -1,0 +1,328 @@
+/* check user penalties and privileges
+   NOTE: first find the user's passowrd
+         then check the user's privileges.
+         data is returned in format: 
+         first result set:
+           password (string)
+         second result set:
+           0/1 (privilege/penalty), type of priv./pen. (number)
+           2 guest unique ID info
+
+   Changes for subscription support:
+   - "locked" flag in user table mean name can't login, so return a 
+     kick penalty in this case so vpusers will deny login.
+*/
+IF EXISTS(SELECT name FROM sysobjects WHERE name='checkUser' AND type='P')
+ DROP PROC checkUser
+GO
+CREATE PROC checkUser ( @userToCheck VPuserID, @regMode VpRegMode, @diffFromGMT int = NULL, @uniqueId longName = NULL )
+AS
+BEGIN
+  --  set isolation level to 0
+  set transaction isolation level 0
+  
+  /* dummy table to return empty result set */
+  /* original definition of type is: 
+     sp_addtype VPPassword, "varchar(20)"
+     can't use user-defined types in tempdb, so
+     varchar(20) is used
+  */
+  CREATE TABLE #emptyPasswords ( password varchar(20) )
+  
+  /* some constants */
+  DECLARE @AUX_REG_MODE int
+  DECLARE @GUEST_REG_MODE int
+  DECLARE @LOCAL_REG_MODE int
+  SELECT @AUX_REG_MODE = 3
+  SELECT @GUEST_REG_MODE = 1
+  SELECT @LOCAL_REG_MODE = 2
+  DECLARE @bannedName VPuserID
+  
+  /* turn all user ID to lower case, to get case insensitive comparisons */
+  SELECT @userToCheck = lower(@userToCheck)
+  DECLARE @thisTime VpTime
+  DECLARE @lastError int
+  
+  DECLARE @userID userIdentifier
+  DECLARE @password VPPassword
+  
+  BEGIN TRAN checkUser
+    IF @diffFromGMT IS NULL
+    BEGIN
+      SELECT @diffFromGMT = gmt
+      FROM getGMT
+      
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN checkUser
+        RETURN @lastError
+      END
+      
+      IF @diffFromGMT IS NULL
+        SELECT @diffFromGMT = 0
+    END
+    
+    SELECT @thisTime = dateadd( hour, (-1) * @diffFromGMT, getdate() )
+  
+    
+    IF @regMode = @AUX_REG_MODE
+    BEGIN
+      /* for methods where checking is done outside */
+      SELECT "" /* dummy output on first result set */
+    END
+    
+    IF @regMode = @LOCAL_REG_MODE /* local registration - get password */
+    BEGIN
+      SELECT @userID = users.userID
+        FROM users
+        WHERE ( registrationMode = 2) AND 
+              ( nickName = @userToCheck )
+              /* make "locked" user appear unregistered */
+              AND (locked = 0)
+  
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN checkUser
+        RETURN @lastError
+      END
+      
+      IF @userID IS NOT NULL
+      BEGIN
+        SELECT @password = password
+          FROM registration
+          WHERE ( userID = @userID )
+                AND
+                deleteDate IS NULL
+    
+        SELECT @lastError = @@error
+        IF @lastError != 0
+        BEGIN
+          ROLLBACK TRAN checkUser
+          RETURN @lastError
+        END
+      END
+      
+      IF @password IS NOT NULL
+      BEGIN
+        SELECT @password /* to send output */
+        
+	-- Removed for performance reasons. Updates should be done by a 
+	-- script in batch mode, to streamline the chat signin process.
+	-- Also, it is misleading to do it here, since failed attempts
+	-- (e.g. due to bad password) still update the signin date.
+
+        -- UPDATE registration
+          -- SET lastSignOnDate = @thisTime
+          -- WHERE ( userID = @userID )
+
+        -- SELECT @lastError = @@error
+        -- IF @lastError != 0
+        -- BEGIN
+          -- ROLLBACK TRAN checkUser
+          -- RETURN @lastError
+        -- END
+      
+      END
+      ELSE
+        /* need result set here - create dummy output - 
+           place holder for password - use bannedNames because it's small */
+        SELECT password FROM #emptyPasswords
+        
+      
+    END /* IF @regMode = @LOCAL_REG_MODE */
+    ELSE
+    BEGIN
+      /* @regMode != @LOCAL_REG_MODE */
+      IF ( @regMode != @GUEST_REG_MODE )
+      BEGIN
+        /* try to find the user ID in the database,
+           in case there are any penalties/privileges given to him */
+        SELECT @userID = userID
+          FROM users 
+          WHERE ( nickName = @userToCheck ) AND
+                ( registrationMode = @regMode )
+        
+        SELECT @lastError = @@error
+        IF @lastError != 0
+        BEGIN
+          ROLLBACK TRAN checkUser
+          RETURN @lastError
+        END
+      END /* @regMode != @GUEST_REG_MODE */
+    END /* @regMode != @LOCAL_REG_MODE */
+    
+    IF @regMode = @GUEST_REG_MODE /* guest - find if name is banned */
+    BEGIN
+
+      SELECT @bannedName = nickName
+        FROM bannedNames
+        WHERE ( substring( @userToCheck, 1, char_length(nickName) )= nickName ) AND
+	      ( isBanned = 1 )
+      IF @@rowcount > 0
+      BEGIN
+        SELECT @bannedName
+      END
+      ELSE /* @@rowcount = 0 */
+      BEGIN
+        SELECT @lastError = @@error
+        IF @lastError != 0
+        BEGIN
+          ROLLBACK TRAN checkUser
+          RETURN @lastError
+        END
+        
+        SELECT nickName
+          FROM users 
+          WHERE ( registrationMode = 2 ) AND
+                ( nickName = @userToCheck )
+        
+        SELECT @lastError = @@error
+        IF @lastError != 0
+        BEGIN
+          ROLLBACK TRAN checkUser
+          RETURN @lastError
+        END
+      END
+
+      /*
+       * If unique ID passed in, check if we have seen it before. If no,
+       * insert a record, with current timestamp. If yes, check if guest
+       * grace period is expired, or invalid ID, or blocked.
+       */
+      DECLARE @blocked      bit
+      DECLARE @guestStarted VpTime
+      DECLARE @guestPeriod  int
+
+      IF @uniqueId IS NULL OR @uniqueId = ''
+      BEGIN
+        SELECT 2, 3	-- invalid or missing unique ID
+      END
+      ELSE BEGIN
+        SELECT @guestPeriod = intValue
+          FROM configurationKeys
+          WHERE ( keyName = "guestPeriod" )
+
+        SELECT @lastError = @@error
+        IF @lastError != 0
+        BEGIN
+          ROLLBACK TRAN checkUser
+          RETURN @lastError
+        END
+
+        IF @guestPeriod IS NULL
+        BEGIN
+          SELECT @guestPeriod = 7	-- default 7 days
+        END
+        
+        SELECT @blocked = blocked,
+               @guestStarted = guestStarted
+          FROM uniqueClients
+          WHERE uniqueId = @uniqueId
+
+        SELECT @lastError = @@error
+        IF @lastError != 0
+        BEGIN
+          ROLLBACK TRAN checkUser
+          RETURN @lastError
+        END
+
+        /*
+         * haven't seen this one before
+         */
+        IF @guestStarted IS NULL
+        BEGIN
+          INSERT uniqueClients (uniqueId, guestStarted, blocked, visits)
+            VALUES (@uniqueId, @thisTime, 0, 1)
+
+          SELECT @lastError = @@error
+          IF @lastError != 0
+          BEGIN
+            ROLLBACK TRAN checkUser
+            RETURN @lastError
+          END
+
+          SELECT 2, 0		-- guest OK
+        END
+
+        /*
+         * returning guest
+         */
+        ELSE BEGIN
+          IF @blocked = 1
+          BEGIN
+            SELECT 2, 1		-- guest blocked
+          END
+          ELSE BEGIN
+            IF ( dateadd ( day, @guestPeriod, @guestStarted ) < @thisTime )
+            BEGIN
+              SELECT 2, 2	-- guest expired
+            END
+            ELSE BEGIN
+              SELECT 2, 0	-- guest OK
+              UPDATE uniqueClients
+                SET visits = visits + 1
+                WHERE uniqueId = @uniqueId
+
+              SELECT @lastError = @@error
+              IF @lastError != 0
+              BEGIN
+                ROLLBACK TRAN checkUser
+                RETURN @lastError
+              END
+            END
+          END
+        END
+      END
+    END /* IF @regMode = @GUEST_REG_MODE */
+    ELSE
+    BEGIN
+      IF ( @userID IS NULL )
+      BEGIN
+        /* dummy, just to create an empty result set */
+        SELECT 1, penaltyType
+          FROM penalties
+          WHERE 1=2
+      END
+      ELSE
+      BEGIN
+        /* @userID IS NOT NULL */
+        /* @regMode != @GUEST_REG_MODE - check for privileges and penalties */
+        
+        SELECT 1, penaltyType /* 1 to indicate that this is a penalty */
+          FROM penalties
+          WHERE ( penalties.userID = @userID ) AND
+    	        ( expiresOn > @thisTime )      AND
+                ( forgiven = 0 )
+        UNION
+        /*
+         * if the user registration is "locked", 
+         * make it look like a kick penalty 
+         */
+        -- SELECT 1, 0	/* 1=penalty, 0=kick */
+          -- FROM users
+          -- WHERE ( userID = @userID ) AND
+                -- ( locked = 1 )
+        -- UNION
+        SELECT 0, privilegeType /* 0 marks this as privilege */
+          FROM userPrivileges
+          WHERE ( userPrivileges.userID = @userID )
+        
+        SELECT @lastError = @@error
+        IF @lastError != 0
+        BEGIN
+          ROLLBACK TRAN checkUser
+          RETURN @lastError
+        END
+      END /* @userID IS NOT NULL */
+    END /* @regMode != @GUEST_REG_MODE */
+  COMMIT TRAN checkUser
+  
+END
+GO 
+IF OBJECT_ID('dbo.checkUser') IS NOT NULL
+        PRINT '<<< CREATED PROCEDURE dbo.checkUser >>>'
+ELSE
+        PRINT '<<< FAILED CREATING PROCEDURE dbo.checkUser >>>'
+GO

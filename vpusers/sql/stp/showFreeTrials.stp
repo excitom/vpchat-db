@@ -1,0 +1,732 @@
+/* 
+ * Show information about free trial accounts
+ *
+ * Input:
+ *  Sort direction (1=ASC, 0=DESC)
+ *  Include New (bit flag)
+ *  Include Pending (bit flag)
+ *  Include Cancelled (bit flag)
+ *  Include Completed (bit flag)
+ *  Number of days to include (backward from today)
+ *
+ * Output rows:
+ *  Category (N, P, C, or K)
+ *  AccountID
+ *  Acct owner name
+ *  Creation date
+ *
+ * Return code:
+ *  0 = success
+ *  20000 = invalid sort col
+ */
+CREATE PROC showFreeTrials (
+  @direction	bit = 1,
+  @inclNew	bit = 1,
+  @inclPend	bit = 1,
+  @inclCanc	bit = 1,
+  @inclCompl	bit = 1,
+  @days		integer = 30
+)
+AS
+BEGIN
+  DECLARE @date VpTime
+  DECLARE @diffFromGMT int
+  DECLARE @lastError int
+  SELECT @diffFromGMT = gmt
+    FROM getGMT
+  IF @diffFromGMT IS NULL
+    SELECT @diffFromGMT = 0
+
+  SELECT @lastError = @@error
+  IF @lastError != 0
+  BEGIN
+    RETURN @lastError
+  END
+
+  SELECT @date = dateadd( hour, (-1) * @diffFromGMT, getdate() )
+  SELECT @date = dateadd( day, (-1) * @days, @date )
+  /* ------ sort by date ascending -------- */
+  IF @direction = 1
+  BEGIN
+
+    /* ------ N, P, C, K ------------------ */
+    IF @inclNew = 1 AND @inclPend = 1 AND @inclCanc = 1 AND @inclCompl = 1
+    BEGIN
+      SELECT 'N',renewals.accountID, creationDate, accountStatus, paymentStatus, months
+        FROM renewals, userAccounts
+        WHERE freeTrial = 1
+        AND   paymentStatus = 5
+        AND   accountStatus = 1
+        AND   renewals.accountID = userAccounts.accountID
+	AND   creationDate >= @date
+      UNION
+      SELECT 'P',renewals.accountID, creationDate, accountStatus, paymentStatus, months
+        FROM renewals, userAccounts
+        WHERE freeTrial = 1
+        AND   paymentStatus = 5
+        AND   accountStatus = 2
+        AND   renewals.accountID = userAccounts.accountID
+	AND   creationDate >= @date
+      UNION
+      SELECT 'C',renewals.accountID, creationDate, accountStatus, paymentStatus, months
+        FROM renewals, userAccounts
+        WHERE freeTrial = 1
+        AND   paymentStatus = 5
+        AND   accountStatus = 5
+        AND   renewals.accountID = userAccounts.accountID
+	AND   creationDate >= @date
+      UNION
+      SELECT 'K',renewals.accountID, creationDate, accountStatus, paymentStatus, months
+        FROM renewals, userAccounts
+        WHERE freeTrial = 1
+        AND   months > 0
+        AND   renewals.accountID = userAccounts.accountID
+	AND   creationDate >= @date
+      ORDER BY creationDate
+      ASC
+    END
+
+    /* ------ N, P, C --------------------- */
+    IF @inclNew = 1 AND @inclPend = 1 AND @inclCanc = 1 AND @inclCompl = 0
+    BEGIN
+      SELECT 'N',renewals.accountID, creationDate, accountStatus, paymentStatus, months
+        FROM renewals, userAccounts
+        WHERE freeTrial = 1
+        AND   paymentStatus = 5
+        AND   accountStatus = 1
+        AND   renewals.accountID = userAccounts.accountID
+	AND   creationDate >= @date
+      UNION
+      SELECT 'P',renewals.accountID, creationDate, accountStatus, paymentStatus, months
+        FROM renewals, userAccounts
+        WHERE freeTrial = 1
+        AND   paymentStatus = 5
+        AND   accountStatus = 2
+        AND   renewals.accountID = userAccounts.accountID
+	AND   creationDate >= @date
+      UNION
+      SELECT 'C',renewals.accountID, creationDate, accountStatus, paymentStatus, months
+        FROM renewals, userAccounts
+        WHERE freeTrial = 1
+        AND   paymentStatus = 5
+        AND   accountStatus = 5
+        AND   renewals.accountID = userAccounts.accountID
+	AND   creationDate >= @date
+      ORDER BY creationDate
+      ASC
+    END
+
+    /* ------ N, P, K --------------------- */
+    IF @inclNew = 1 AND @inclPend = 1 AND @inclCanc = 0 AND @inclCompl = 1
+    BEGIN
+      SELECT 'N',renewals.accountID, creationDate, accountStatus, paymentStatus, months
+        FROM renewals, userAccounts
+        WHERE freeTrial = 1
+        AND   paymentStatus = 5
+        AND   accountStatus = 1
+        AND   renewals.accountID = userAccounts.accountID
+	AND   creationDate >= @date
+      UNION
+      SELECT 'P',renewals.accountID, creationDate, accountStatus, paymentStatus, months
+        FROM renewals, userAccounts
+        WHERE freeTrial = 1
+        AND   paymentStatus = 5
+        AND   accountStatus = 2
+        AND   renewals.accountID = userAccounts.accountID
+	AND   creationDate >= @date
+      UNION
+      SELECT 'K',renewals.accountID, creationDate, accountStatus, paymentStatus, months
+        FROM renewals, userAccounts
+        WHERE freeTrial = 1
+        AND   months > 0
+        AND   renewals.accountID = userAccounts.accountID
+	AND   creationDate >= @date
+      ORDER BY creationDate
+      ASC
+    END
+
+    /* ------ N, P ------------------------ */
+    IF @inclNew = 1 AND @inclPend = 1 AND @inclCanc = 0 AND @inclCompl = 0
+    BEGIN
+      SELECT 'N',renewals.accountID, creationDate, accountStatus, paymentStatus, months
+        FROM renewals, userAccounts
+        WHERE freeTrial = 1
+        AND   paymentStatus = 5
+        AND   accountStatus = 1
+        AND   renewals.accountID = userAccounts.accountID
+	AND   creationDate >= @date
+      UNION
+      SELECT 'P',renewals.accountID, creationDate, accountStatus, paymentStatus, months
+        FROM renewals, userAccounts
+        WHERE freeTrial = 1
+        AND   paymentStatus = 5
+        AND   accountStatus = 2
+        AND   renewals.accountID = userAccounts.accountID
+	AND   creationDate >= @date
+      ORDER BY creationDate
+      ASC
+    END
+
+    /* ------ N, C, K --------------------- */
+    IF @inclNew = 1 AND @inclPend = 0 AND @inclCanc = 1 AND @inclCompl = 1
+    BEGIN
+      SELECT 'N',renewals.accountID, creationDate, accountStatus, paymentStatus, months
+        FROM renewals, userAccounts
+        WHERE freeTrial = 1
+        AND   paymentStatus = 5
+        AND   accountStatus = 1
+        AND   renewals.accountID = userAccounts.accountID
+	AND   creationDate >= @date
+      UNION
+      SELECT 'C',renewals.accountID, creationDate, accountStatus, paymentStatus, months
+        FROM renewals, userAccounts
+        WHERE freeTrial = 1
+        AND   paymentStatus = 5
+        AND   accountStatus = 5
+        AND   renewals.accountID = userAccounts.accountID
+	AND   creationDate >= @date
+      UNION
+      SELECT 'K',renewals.accountID, creationDate, accountStatus, paymentStatus, months
+        FROM renewals, userAccounts
+        WHERE freeTrial = 1
+        AND   months > 0
+        AND   renewals.accountID = userAccounts.accountID
+	AND   creationDate >= @date
+      ORDER BY creationDate
+      ASC
+    END
+
+    /* ------ N, C ------------------------ */
+    IF @inclNew = 1 AND @inclPend = 0 AND @inclCanc = 1 AND @inclCompl = 0
+    BEGIN
+      SELECT 'N',renewals.accountID, creationDate, accountStatus, paymentStatus, months
+        FROM renewals, userAccounts
+        WHERE freeTrial = 1
+        AND   paymentStatus = 5
+        AND   accountStatus = 1
+        AND   renewals.accountID = userAccounts.accountID
+	AND   creationDate >= @date
+      UNION
+      SELECT 'C',renewals.accountID, creationDate, accountStatus, paymentStatus, months
+        FROM renewals, userAccounts
+        WHERE freeTrial = 1
+        AND   paymentStatus = 5
+        AND   accountStatus = 5
+        AND   renewals.accountID = userAccounts.accountID
+	AND   creationDate >= @date
+      ORDER BY creationDate
+      ASC
+    END
+
+    /* ------ N, K ------------------------ */
+    IF @inclNew = 1 AND @inclPend = 0 AND @inclCanc = 0 AND @inclCompl = 1
+    BEGIN
+      SELECT 'N',renewals.accountID, creationDate, accountStatus, paymentStatus, months
+        FROM renewals, userAccounts
+        WHERE freeTrial = 1
+        AND   paymentStatus = 5
+        AND   accountStatus = 1
+        AND   renewals.accountID = userAccounts.accountID
+	AND   creationDate >= @date
+      UNION
+      SELECT 'K',renewals.accountID, creationDate, accountStatus, paymentStatus, months
+        FROM renewals, userAccounts
+        WHERE freeTrial = 1
+        AND   months > 0
+        AND   renewals.accountID = userAccounts.accountID
+	AND   creationDate >= @date
+      ORDER BY creationDate
+      ASC
+    END
+
+    /* ------ N --------------------------- */
+    IF @inclNew = 1 AND @inclPend = 0 AND @inclCanc = 0 AND @inclCompl = 0
+    BEGIN
+      SELECT 'N',renewals.accountID, creationDate, accountStatus, paymentStatus, months
+        FROM renewals, userAccounts
+        WHERE freeTrial = 1
+        AND   paymentStatus = 5
+        AND   accountStatus = 1
+        AND   renewals.accountID = userAccounts.accountID
+	AND   creationDate >= @date
+      ORDER BY creationDate
+      ASC
+    END
+
+    /* ------ P, C, K --------------------- */
+    IF @inclNew = 0 AND @inclPend = 1 AND @inclCanc = 1 AND @inclCompl = 1
+    BEGIN
+      SELECT 'P',renewals.accountID, creationDate, accountStatus, paymentStatus, months
+        FROM renewals, userAccounts
+        WHERE freeTrial = 1
+        AND   paymentStatus = 5
+        AND   accountStatus = 2
+        AND   renewals.accountID = userAccounts.accountID
+	AND   creationDate >= @date
+      UNION
+      SELECT 'C',renewals.accountID, creationDate, accountStatus, paymentStatus, months
+        FROM renewals, userAccounts
+        WHERE freeTrial = 1
+        AND   paymentStatus = 5
+        AND   accountStatus = 5
+        AND   renewals.accountID = userAccounts.accountID
+	AND   creationDate >= @date
+      UNION
+      SELECT 'K',renewals.accountID, creationDate, accountStatus, paymentStatus, months
+        FROM renewals, userAccounts
+        WHERE freeTrial = 1
+        AND   months > 0
+        AND   renewals.accountID = userAccounts.accountID
+	AND   creationDate >= @date
+      ORDER BY creationDate
+      ASC
+    END
+
+    /* ------ P, C ------------------------ */
+    IF @inclNew = 0 AND @inclPend = 1 AND @inclCanc = 1 AND @inclCompl = 0
+    BEGIN
+      SELECT 'P',renewals.accountID, creationDate, accountStatus, paymentStatus, months
+        FROM renewals, userAccounts
+        WHERE freeTrial = 1
+        AND   paymentStatus = 5
+        AND   accountStatus = 2
+        AND   renewals.accountID = userAccounts.accountID
+	AND   creationDate >= @date
+      UNION
+      SELECT 'C',renewals.accountID, creationDate, accountStatus, paymentStatus, months
+        FROM renewals, userAccounts
+        WHERE freeTrial = 1
+        AND   paymentStatus = 5
+        AND   accountStatus = 5
+        AND   renewals.accountID = userAccounts.accountID
+	AND   creationDate >= @date
+      ORDER BY creationDate
+      ASC
+    END
+
+    /* ------ P, K ------------------------ */
+    IF @inclNew = 0 AND @inclPend = 1 AND @inclCanc = 0 AND @inclCompl = 1
+    BEGIN
+      SELECT 'P',renewals.accountID, creationDate, accountStatus, paymentStatus, months
+        FROM renewals, userAccounts
+        WHERE freeTrial = 1
+        AND   paymentStatus = 5
+        AND   accountStatus = 2
+        AND   renewals.accountID = userAccounts.accountID
+	AND   creationDate >= @date
+      UNION
+      SELECT 'K',renewals.accountID, creationDate, accountStatus, paymentStatus, months
+        FROM renewals, userAccounts
+        WHERE freeTrial = 1
+        AND   months > 0
+        AND   renewals.accountID = userAccounts.accountID
+	AND   creationDate >= @date
+      ORDER BY creationDate
+      ASC
+    END
+
+    /* ------ P  --------------------------- */
+    IF @inclNew = 0 AND @inclPend = 1 AND @inclCanc = 0 AND @inclCompl = 0
+    BEGIN
+      SELECT 'P',renewals.accountID, creationDate, accountStatus, paymentStatus, months
+        FROM renewals, userAccounts
+        WHERE freeTrial = 1
+        AND   paymentStatus = 5
+        AND   accountStatus = 2
+        AND   renewals.accountID = userAccounts.accountID
+	AND   creationDate >= @date
+      ORDER BY creationDate
+      ASC
+    END
+
+    /* ------ C, K ------------------------ */
+    IF @inclNew = 0 AND @inclPend = 0 AND @inclCanc = 1 AND @inclCompl = 1
+    BEGIN
+      SELECT 'C',renewals.accountID, creationDate, accountStatus, paymentStatus, months
+        FROM renewals, userAccounts
+        WHERE freeTrial = 1
+        AND   paymentStatus = 5
+        AND   accountStatus = 5
+        AND   renewals.accountID = userAccounts.accountID
+	AND   creationDate >= @date
+      UNION
+      SELECT 'K',renewals.accountID, creationDate, accountStatus, paymentStatus, months
+        FROM renewals, userAccounts
+        WHERE freeTrial = 1
+        AND   months > 0
+        AND   renewals.accountID = userAccounts.accountID
+	AND   creationDate >= @date
+      ORDER BY creationDate
+      ASC
+    END
+
+    /* ------ C --------------------------- */
+    IF @inclNew = 0 AND @inclPend = 0 AND @inclCanc = 1 AND @inclCompl = 0
+    BEGIN
+      SELECT 'C',renewals.accountID, creationDate, accountStatus, paymentStatus, months
+        FROM renewals, userAccounts
+        WHERE freeTrial = 1
+        AND   paymentStatus = 5
+        AND   accountStatus = 5
+        AND   renewals.accountID = userAccounts.accountID
+	AND   creationDate >= @date
+      ORDER BY creationDate
+      ASC
+    END
+
+    /* ------ K --------------------------- */
+    IF @inclNew = 0 AND @inclPend = 0 AND @inclCanc = 0 AND @inclCompl = 1
+    BEGIN
+      SELECT 'K',renewals.accountID, creationDate, accountStatus, paymentStatus, months
+        FROM renewals, userAccounts
+        WHERE freeTrial = 1
+        AND   months > 0
+        AND   renewals.accountID = userAccounts.accountID
+	AND   creationDate >= @date
+      ORDER BY creationDate
+      ASC
+    END
+  END
+  /* ------ sort by date descending -------- */
+  ELSE BEGIN
+
+    /* ------ N, P, C, K ------------------ */
+    IF @inclNew = 1 AND @inclPend = 1 AND @inclCanc = 1 AND @inclCompl = 1
+    BEGIN
+      SELECT 'N',renewals.accountID, creationDate, accountStatus, paymentStatus, months
+        FROM renewals, userAccounts
+        WHERE freeTrial = 1
+        AND   paymentStatus = 5
+        AND   accountStatus = 1
+        AND   renewals.accountID = userAccounts.accountID
+	AND   creationDate >= @date
+      UNION
+      SELECT 'P',renewals.accountID, creationDate, accountStatus, paymentStatus, months
+        FROM renewals, userAccounts
+        WHERE freeTrial = 1
+        AND   paymentStatus = 5
+        AND   accountStatus = 2
+        AND   renewals.accountID = userAccounts.accountID
+	AND   creationDate >= @date
+      UNION
+      SELECT 'C',renewals.accountID, creationDate, accountStatus, paymentStatus, months
+        FROM renewals, userAccounts
+        WHERE freeTrial = 1
+        AND   paymentStatus = 5
+        AND   accountStatus = 5
+        AND   renewals.accountID = userAccounts.accountID
+	AND   creationDate >= @date
+      UNION
+      SELECT 'K',renewals.accountID, creationDate, accountStatus, paymentStatus, months
+        FROM renewals, userAccounts
+        WHERE freeTrial = 1
+        AND   months > 0
+        AND   renewals.accountID = userAccounts.accountID
+	AND   creationDate >= @date
+      ORDER BY creationDate
+      DESC
+    END
+
+    /* ------ N, P, C --------------------- */
+    IF @inclNew = 1 AND @inclPend = 1 AND @inclCanc = 1 AND @inclCompl = 0
+    BEGIN
+      SELECT 'N',renewals.accountID, creationDate, accountStatus, paymentStatus, months
+        FROM renewals, userAccounts
+        WHERE freeTrial = 1
+        AND   paymentStatus = 5
+        AND   accountStatus = 1
+        AND   renewals.accountID = userAccounts.accountID
+	AND   creationDate >= @date
+      UNION
+      SELECT 'P',renewals.accountID, creationDate, accountStatus, paymentStatus, months
+        FROM renewals, userAccounts
+        WHERE freeTrial = 1
+        AND   paymentStatus = 5
+        AND   accountStatus = 2
+        AND   renewals.accountID = userAccounts.accountID
+	AND   creationDate >= @date
+      UNION
+      SELECT 'C',renewals.accountID, creationDate, accountStatus, paymentStatus, months
+        FROM renewals, userAccounts
+        WHERE freeTrial = 1
+        AND   paymentStatus = 5
+        AND   accountStatus = 5
+        AND   renewals.accountID = userAccounts.accountID
+	AND   creationDate >= @date
+      ORDER BY creationDate
+      DESC
+    END
+
+    /* ------ N, P, K --------------------- */
+    IF @inclNew = 1 AND @inclPend = 1 AND @inclCanc = 0 AND @inclCompl = 1
+    BEGIN
+      SELECT 'N',renewals.accountID, creationDate, accountStatus, paymentStatus, months
+        FROM renewals, userAccounts
+        WHERE freeTrial = 1
+        AND   paymentStatus = 5
+        AND   accountStatus = 1
+        AND   renewals.accountID = userAccounts.accountID
+	AND   creationDate >= @date
+      UNION
+      SELECT 'P',renewals.accountID, creationDate, accountStatus, paymentStatus, months
+        FROM renewals, userAccounts
+        WHERE freeTrial = 1
+        AND   paymentStatus = 5
+        AND   accountStatus = 2
+        AND   renewals.accountID = userAccounts.accountID
+	AND   creationDate >= @date
+      UNION
+      SELECT 'K',renewals.accountID, creationDate, accountStatus, paymentStatus, months
+        FROM renewals, userAccounts
+        WHERE freeTrial = 1
+        AND   months > 0
+        AND   renewals.accountID = userAccounts.accountID
+	AND   creationDate >= @date
+      ORDER BY creationDate
+      DESC
+    END
+
+    /* ------ N, P ------------------------ */
+    IF @inclNew = 1 AND @inclPend = 1 AND @inclCanc = 0 AND @inclCompl = 0
+    BEGIN
+      SELECT 'N',renewals.accountID, creationDate, accountStatus, paymentStatus, months
+        FROM renewals, userAccounts
+        WHERE freeTrial = 1
+        AND   paymentStatus = 5
+        AND   accountStatus = 1
+        AND   renewals.accountID = userAccounts.accountID
+	AND   creationDate >= @date
+      UNION
+      SELECT 'P',renewals.accountID, creationDate, accountStatus, paymentStatus, months
+        FROM renewals, userAccounts
+        WHERE freeTrial = 1
+        AND   paymentStatus = 5
+        AND   accountStatus = 2
+        AND   renewals.accountID = userAccounts.accountID
+	AND   creationDate >= @date
+      ORDER BY creationDate
+      DESC
+    END
+
+    /* ------ N, C, K --------------------- */
+    IF @inclNew = 1 AND @inclPend = 0 AND @inclCanc = 1 AND @inclCompl = 1
+    BEGIN
+      SELECT 'N',renewals.accountID, creationDate, accountStatus, paymentStatus, months
+        FROM renewals, userAccounts
+        WHERE freeTrial = 1
+        AND   paymentStatus = 5
+        AND   accountStatus = 1
+        AND   renewals.accountID = userAccounts.accountID
+	AND   creationDate >= @date
+      UNION
+      SELECT 'C',renewals.accountID, creationDate, accountStatus, paymentStatus, months
+        FROM renewals, userAccounts
+        WHERE freeTrial = 1
+        AND   paymentStatus = 5
+        AND   accountStatus = 5
+        AND   renewals.accountID = userAccounts.accountID
+	AND   creationDate >= @date
+      UNION
+      SELECT 'K',renewals.accountID, creationDate, accountStatus, paymentStatus, months
+        FROM renewals, userAccounts
+        WHERE freeTrial = 1
+        AND   months > 0
+        AND   renewals.accountID = userAccounts.accountID
+	AND   creationDate >= @date
+      ORDER BY creationDate
+      DESC
+    END
+
+    /* ------ N, C ------------------------ */
+    IF @inclNew = 1 AND @inclPend = 0 AND @inclCanc = 1 AND @inclCompl = 0
+    BEGIN
+      SELECT 'N',renewals.accountID, creationDate, accountStatus, paymentStatus, months
+        FROM renewals, userAccounts
+        WHERE freeTrial = 1
+        AND   paymentStatus = 5
+        AND   accountStatus = 1
+        AND   renewals.accountID = userAccounts.accountID
+	AND   creationDate >= @date
+      UNION
+      SELECT 'C',renewals.accountID, creationDate, accountStatus, paymentStatus, months
+        FROM renewals, userAccounts
+        WHERE freeTrial = 1
+        AND   paymentStatus = 5
+        AND   accountStatus = 5
+        AND   renewals.accountID = userAccounts.accountID
+	AND   creationDate >= @date
+      ORDER BY creationDate
+      DESC
+    END
+
+    /* ------ N, K ------------------------ */
+    IF @inclNew = 1 AND @inclPend = 0 AND @inclCanc = 0 AND @inclCompl = 1
+    BEGIN
+      SELECT 'N',renewals.accountID, creationDate, accountStatus, paymentStatus, months
+        FROM renewals, userAccounts
+        WHERE freeTrial = 1
+        AND   paymentStatus = 5
+        AND   accountStatus = 1
+        AND   renewals.accountID = userAccounts.accountID
+	AND   creationDate >= @date
+      UNION
+      SELECT 'K',renewals.accountID, creationDate, accountStatus, paymentStatus, months
+        FROM renewals, userAccounts
+        WHERE freeTrial = 1
+        AND   months > 0
+        AND   renewals.accountID = userAccounts.accountID
+	AND   creationDate >= @date
+      ORDER BY creationDate
+      DESC
+    END
+
+    /* ------ N --------------------------- */
+    IF @inclNew = 1 AND @inclPend = 0 AND @inclCanc = 0 AND @inclCompl = 0
+    BEGIN
+      SELECT 'N',renewals.accountID, creationDate, accountStatus, paymentStatus, months
+        FROM renewals, userAccounts
+        WHERE freeTrial = 1
+        AND   paymentStatus = 5
+        AND   accountStatus = 1
+        AND   renewals.accountID = userAccounts.accountID
+	AND   creationDate >= @date
+      ORDER BY creationDate
+      DESC
+    END
+
+    /* ------ P, C, K --------------------- */
+    IF @inclNew = 0 AND @inclPend = 1 AND @inclCanc = 1 AND @inclCompl = 1
+    BEGIN
+      SELECT 'P',renewals.accountID, creationDate, accountStatus, paymentStatus, months
+        FROM renewals, userAccounts
+        WHERE freeTrial = 1
+        AND   paymentStatus = 5
+        AND   accountStatus = 2
+        AND   renewals.accountID = userAccounts.accountID
+	AND   creationDate >= @date
+      UNION
+      SELECT 'C',renewals.accountID, creationDate, accountStatus, paymentStatus, months
+        FROM renewals, userAccounts
+        WHERE freeTrial = 1
+        AND   paymentStatus = 5
+        AND   accountStatus = 5
+        AND   renewals.accountID = userAccounts.accountID
+	AND   creationDate >= @date
+      UNION
+      SELECT 'K',renewals.accountID, creationDate, accountStatus, paymentStatus, months
+        FROM renewals, userAccounts
+        WHERE freeTrial = 1
+        AND   months > 0
+        AND   renewals.accountID = userAccounts.accountID
+	AND   creationDate >= @date
+      ORDER BY creationDate
+      DESC
+    END
+
+    /* ------ P, C ------------------------ */
+    IF @inclNew = 0 AND @inclPend = 1 AND @inclCanc = 1 AND @inclCompl = 0
+    BEGIN
+      SELECT 'P',renewals.accountID, creationDate, accountStatus, paymentStatus, months
+        FROM renewals, userAccounts
+        WHERE freeTrial = 1
+        AND   paymentStatus = 5
+        AND   accountStatus = 2
+        AND   renewals.accountID = userAccounts.accountID
+	AND   creationDate >= @date
+      UNION
+      SELECT 'C',renewals.accountID, creationDate, accountStatus, paymentStatus, months
+        FROM renewals, userAccounts
+        WHERE freeTrial = 1
+        AND   paymentStatus = 5
+        AND   accountStatus = 5
+        AND   renewals.accountID = userAccounts.accountID
+	AND   creationDate >= @date
+      ORDER BY creationDate
+      DESC
+    END
+
+    /* ------ P, K ------------------------ */
+    IF @inclNew = 0 AND @inclPend = 1 AND @inclCanc = 0 AND @inclCompl = 1
+    BEGIN
+      SELECT 'P',renewals.accountID, creationDate, accountStatus, paymentStatus, months
+        FROM renewals, userAccounts
+        WHERE freeTrial = 1
+        AND   paymentStatus = 5
+        AND   accountStatus = 2
+        AND   renewals.accountID = userAccounts.accountID
+	AND   creationDate >= @date
+      UNION
+      SELECT 'K',renewals.accountID, creationDate, accountStatus, paymentStatus, months
+        FROM renewals, userAccounts
+        WHERE freeTrial = 1
+        AND   months > 0
+        AND   renewals.accountID = userAccounts.accountID
+	AND   creationDate >= @date
+      ORDER BY creationDate
+      DESC
+    END
+
+    /* ------ P  --------------------------- */
+    IF @inclNew = 0 AND @inclPend = 1 AND @inclCanc = 0 AND @inclCompl = 0
+    BEGIN
+      SELECT 'P',renewals.accountID, creationDate, accountStatus, paymentStatus, months
+        FROM renewals, userAccounts
+        WHERE freeTrial = 1
+        AND   paymentStatus = 5
+        AND   accountStatus = 2
+        AND   renewals.accountID = userAccounts.accountID
+	AND   creationDate >= @date
+      ORDER BY creationDate
+      DESC
+    END
+
+    /* ------ C, K ------------------------ */
+    IF @inclNew = 0 AND @inclPend = 0 AND @inclCanc = 1 AND @inclCompl = 1
+    BEGIN
+      SELECT 'C',renewals.accountID, creationDate, accountStatus, paymentStatus, months
+        FROM renewals, userAccounts
+        WHERE freeTrial = 1
+        AND   paymentStatus = 5
+        AND   accountStatus = 5
+        AND   renewals.accountID = userAccounts.accountID
+	AND   creationDate >= @date
+      UNION
+      SELECT 'K',renewals.accountID, creationDate, accountStatus, paymentStatus, months
+        FROM renewals, userAccounts
+        WHERE freeTrial = 1
+        AND   months > 0
+        AND   renewals.accountID = userAccounts.accountID
+	AND   creationDate >= @date
+      ORDER BY creationDate
+      DESC
+    END
+
+    /* ------ C --------------------------- */
+    IF @inclNew = 0 AND @inclPend = 0 AND @inclCanc = 1 AND @inclCompl = 0
+    BEGIN
+      SELECT 'C',renewals.accountID, creationDate, accountStatus, paymentStatus, months
+        FROM renewals, userAccounts
+        WHERE freeTrial = 1
+        AND   paymentStatus = 5
+        AND   accountStatus = 5
+        AND   renewals.accountID = userAccounts.accountID
+	AND   creationDate >= @date
+      ORDER BY creationDate
+      DESC
+    END
+
+    /* ------ K --------------------------- */
+    IF @inclNew = 0 AND @inclPend = 0 AND @inclCanc = 0 AND @inclCompl = 1
+    BEGIN
+      SELECT 'K',renewals.accountID, creationDate, accountStatus, paymentStatus, months
+        FROM renewals, userAccounts
+        WHERE freeTrial = 1
+        AND   months > 0
+        AND   renewals.accountID = userAccounts.accountID
+	AND   creationDate >= @date
+      ORDER BY creationDate
+      DESC
+    END
+  END
+END
+GO

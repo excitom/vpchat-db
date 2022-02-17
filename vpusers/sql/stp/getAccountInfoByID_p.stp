@@ -1,0 +1,280 @@
+/* get information about a user account
+
+ PHP version 
+
+ Input: accountID
+        flag: 1 => return extended information
+ Output: several result sets
+           
+   accountType:
+	0 = comp
+	1 = Basic
+	2 = Family
+	3 = Sybil
+	4 = Group
+   accountStatus:
+	0 = OK
+	1 = new
+	2 = pending
+	3 = closed
+	4 = suspended - penalty
+	5 = suspended - overdue
+   paymentStatus:
+	0 = OK
+	1 = unconfirmed
+	2 = delinquent
+   billingCycle:
+	months
+
+          return 0 - success
+             20001 - user not found
+*/
+CREATE PROC getAccountInfoByID_p ( @accountID userIdentifier, @extraInfo bit = 0 )
+AS
+BEGIN
+  --  set isolation level to 0
+  set transaction isolation level 0
+  
+  DECLARE @lastError   int
+  
+  DECLARE @userToCheck VPuserID
+
+  /* User registration columns */
+  DECLARE @email            longName
+  DECLARE @creationDate     VpTime
+  DECLARE @lastSignOnDate   VpTime
+
+  /* Account columns */
+  DECLARE @ownerID          userIdentifier
+  DECLARE @accountStatus    tinyInt
+  DECLARE @paymentStatus    tinyInt
+  DECLARE @enrolledReferrer bit
+  DECLARE @hasHomePage      bit
+  DECLARE @hasProfile       bit
+  DECLARE @renewalDate      VpTime
+  DECLARE @billingCycle     tinyInt
+  DECLARE @nextBillingCycle tinyInt
+  DECLARE @unitCost	    smallmoney
+  DECLARE @discount	    float
+  DECLARE @nameLimit        tinyInt
+  DECLARE @accountType      tinyInt
+  DECLARE @lastUpdated      VpTime
+  DECLARE @autoRenew        bit
+  DECLARE @type             smallint
+  DECLARE @ccID             userIdentifier
+  DECLARE @counter          int
+  
+  BEGIN TRAN getAccountInfoByID
+    /* get nickName of accountOwner */
+    SELECT @ownerID= ownerID
+      FROM userAccounts
+      WHERE accountID = @accountID
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN getAccountInfoByID
+      RETURN @lastError
+    END
+
+    IF @ownerID IS NULL
+    BEGIN
+      ROLLBACK TRAN getAccountInfoByID
+      SELECT @lastError = 20001
+      RETURN @lastError
+    END
+
+    SELECT @userToCheck = nickName
+      FROM   users
+      WHERE  userID = @ownerID
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN getAccountInfoByID
+      RETURN @lastError
+    END
+
+    SELECT @email = email,
+           @accountStatus = accountStatus,
+           @accountType = accountType,
+           @paymentStatus = paymentStatus,
+           @enrolledReferrer = enrolledReferrer,
+           @creationDate = creationDate,
+           @renewalDate = renewalDate,
+           @lastUpdated = lastUpdated,
+           @billingCycle = billingCycle,
+           @unitCost = unitCost,
+           @discount = discount,
+           @nameLimit = nameLimit
+      FROM userAccounts
+      WHERE accountID = @accountID
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN getAccountInfoByID
+      RETURN @lastError
+    END
+
+    IF EXISTS (
+      SELECT * FROM vpplaces..homePages, users
+        WHERE nickName = @userToCheck
+        AND   deleted = 0
+        AND   users.userID = vpplaces..homePages.userID )
+    BEGIN
+      SELECT @hasHomePage = 1
+    END
+    ELSE BEGIN
+      SELECT @hasHomePage = 0
+    END
+
+    IF EXISTS (
+      SELECT * FROM userDetails, users
+        WHERE nickName = @userToCheck
+        AND   users.userID = userDetails.userID )
+    BEGIN
+      SELECT @hasProfile = 1
+    END
+    ELSE BEGIN
+      SELECT @hasProfile = 0
+    END
+
+    /* get supplementary information */
+    SELECT @nextBillingCycle = billingCycle
+      FROM pendingAcctChanges
+      WHERE accountID = @accountID
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN getAccountInfo
+      RETURN @lastError
+    END
+
+    IF @nextBillingCycle IS NULL
+    BEGIN
+      SELECT @nextBillingCycle = 0
+    END
+
+    /*
+       Because it's necessary to cancel/recreate PayPal 
+       subscriptions in order to change the subscription terms,
+       there can be multiple type=1 subscription records for an
+       account. If any one of them has autoRenew, then the account
+       is autoRenew. Type=2 (credit card) and type=3 (eCheck)
+       subscriptions are simpler, there is only one record per
+       account.
+
+       A single account shouldn't have more than one active subscription,
+       but it's possible due to various reasons so we'll report the total
+       of all the active subscriptions we find.
+    */
+    SELECT @type = 0
+    SELECT @ccID = 0
+    SELECT @autoRenew = 0
+    IF EXISTS (SELECT * FROM subscriptions
+                 WHERE accountID = @accountID
+                 AND autoRenew = 1)
+    BEGIN
+      IF EXISTS (SELECT * FROM subscriptions
+                   WHERE accountID = @accountID
+                   AND autoRenew = 1
+                   AND type = 1)
+      BEGIN
+        SELECT @type = type, @autoRenew = autoRenew, @ccID = ccID
+          FROM subscriptions
+          WHERE accountID = @accountID
+          AND autoRenew = 1
+          AND type = 1
+      END
+      ELSE BEGIN
+        SELECT @type = type, @autoRenew = autoRenew, @ccID = ccID
+          FROM subscriptions
+          WHERE accountID = @accountID
+          AND autoRenew = 1
+      END
+    END
+    ELSE BEGIN
+      IF EXISTS (SELECT * FROM subscriptions WHERE accountID = @accountID)
+      BEGIN
+        SELECT @autoRenew = autoRenew,
+               @ccID = ccID,
+               @type = type
+          FROM subscriptions
+          WHERE accountID = @accountID
+      END
+    END
+
+    /*
+     * find how many auto-renewal subscriptions there are. should be zero
+     * or one, but we want to know if somehow there are more.
+     */
+    SELECT @counter = COUNT(accountID)
+      FROM subscriptions
+      WHERE accountID = @accountID
+      AND autoRenew = 1
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN getAccountInfo
+      RETURN @lastError
+    END
+
+    IF @extraInfo = 1
+    BEGIN
+      SELECT 1 AS acctOwner,
+      @userToCheck AS nickName,
+      @accountID AS accountID,
+      @email AS email,
+      @creationDate AS creationDate,
+      @renewalDate AS renewalDate,
+      @lastUpdated AS lastUpdated,
+      @accountStatus AS accountStatus,
+      @paymentStatus AS paymentStatus,
+      @enrolledReferrer AS enrolledReferrer,
+      @billingCycle AS billingCycle,
+      @unitCost AS unitCost,
+      @discount AS discount,
+      @nameLimit AS nameLimit,
+      @accountType AS accountType,
+      @nextBillingCycle AS nextBillingCycle,
+      @autoRenew AS autoRenew,
+      @type AS type,
+      @ccID AS ccID,
+      @counter AS counter,
+      @hasHomePage AS hasHomePage,
+      @hasProfile AS hasProfile,
+      freeTrial, oldAcct, months, renewals, wentOverdue, upgrades, goodChecks, badChecks, namesAdded, chargebacks FROM renewals WHERE accountID = @accountID
+
+    END
+    ELSE BEGIN
+      SELECT 1 AS acctOwner,
+      @userToCheck AS nickName,
+      @accountID AS accountID,
+      @email AS email,
+      @creationDate AS creationDate,
+      @renewalDate AS renewalDate,
+      @lastUpdated AS lastUpdated,
+      @accountStatus AS accountStatus,
+      @paymentStatus AS paymentStatus,
+      @enrolledReferrer AS enrolledReferrer,
+      @billingCycle AS billingCycle,
+      @unitCost AS unitCost,
+      @discount AS discount,
+      @nameLimit AS nameLimit,
+      @accountType AS accountType,
+      @nextBillingCycle AS nextBillingCycle,
+      @autoRenew AS autoRenew,
+      @type AS type,
+      @ccID AS ccID,
+      @counter AS counter,
+      @hasHomePage AS hasHomePage,
+      @hasProfile AS hasProfile
+    END
+
+  COMMIT TRAN getAccountInfoByID
+  RETURN 0
+END
+GO 

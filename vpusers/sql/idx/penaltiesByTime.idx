@@ -1,0 +1,4 @@
+/* index penalties by expiry time */
+create index expiryTimeIdx
+on penalties ( expiresOn )
+GO

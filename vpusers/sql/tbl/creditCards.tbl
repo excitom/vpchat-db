@@ -1,0 +1,29 @@
+CREATE TABLE creditCards
+(
+	ccID		userIdentifier			IDENTITY
+                        	constraint isPrimary primary key,
+	Ecom_billto_online_email	VARCHAR(75)	NOT NULL,
+	Ecom_billto_city		VARCHAR(50)	NOT NULL,
+	Ecom_billto_countrycode		CHAR(2)		NOT NULL,
+	Ecom_billto_name_first		VARCHAR(50)	NOT NULL,
+	Ecom_billto_name_last		VARCHAR(50)	NOT NULL,
+	Ecom_billto_postalcode		VARCHAR(20)	NOT NULL,
+	Ecom_billto_stateprov		VARCHAR(30)	NOT NULL,
+	Ecom_billto_street_line1	VARCHAR(50)	NOT NULL,
+	Ecom_billto_street_line2	VARCHAR(50)	NULL,
+	Ecom_billto_phone_number	VARCHAR(16)	NOT NULL,
+	Ecom_card_expdate_month		tinyint		NOT NULL,
+	Ecom_card_expdate_year		smallint	NOT NULL,
+	Ecom_card_name			VARCHAR(50)	NOT NULL,
+	Ecom_card_number		VARCHAR(19)	UNIQUE NOT NULL,
+        Ecom_card_verification          CHAR(4)         NOT NULL,
+        IOC_buyer_type                  CHAR(1)         NOT NULL,
+--              I = Individual
+--              B = Business
+        IOC_CVV_indicator               tinyint         NOT NULL
+--              0 = value bypassed or not provided
+--              1 = value present
+--              2 = value present but illegible
+--              9 = cardholder indicates no CVV imprint on card
+)
+GO

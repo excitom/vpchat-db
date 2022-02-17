@@ -1,0 +1,12 @@
+/* del all items from type and number higher then serialnumber */
+CREATE PROC delPPtgItem
+(
+@serialNumber 	integer,
+@type		integer
+)
+AS
+  DELETE
+    FROM PersistentPTGlist
+    WHERE serialNumber >= @serialNumber
+    AND type = @type
+GO 

@@ -1,0 +1,8 @@
+CREATE TABLE eventChanges
+(
+	eventID		numeric(10,0)			NOT NULL,
+	stateID		numeric(4,0)			NOT NULL,
+	fieldID		integer				NOT NULL,
+		PRIMARY KEY ( eventID, stateID )
+)
+GO

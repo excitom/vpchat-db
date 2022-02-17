@@ -1,0 +1,190 @@
+/* add a new definition of a tournament to the database
+ *
+ * output: return value - 0 if successfull,
+ *                        20001 if ladder does not exist
+ *                        20002 if ladder is locked 
+ *                        20003 if duplicate event
+ *                        20004 unknown type
+ *                        20005 too many players
+ *                        20006 players not a power of 2
+ *                        20007 time earlier than present
+ *                        20008 not enough points
+ */
+IF EXISTS
+ (SELECT name FROM sysobjects WHERE name = 'addTournament' AND type = 'P') 
+ DROP PROC addTournament
+GO  
+CREATE PROC addTournament
+(
+  @notifyID		userIdentifier,
+  @startTime		VpTime,
+  @timeLimit		int,
+  @type			tinyint,
+  @players		smallint,
+  @currencyType		tinyint,
+  @addedValue		smallmoney,
+  @buyIn		smallmoney,
+  @splitPrize		bit,
+  @clientTZ		int = 0,
+  @title		longName = NULL,
+  @tdID			userIdentifier = NULL,
+  @roomURL		longName = NULL
+)
+AS
+BEGIN
+  DECLARE @lastError	integer
+  DECLARE @now	 	VpTime
+  DECLARE @tournID	userIdentifier
+  DECLARE @userID	userIdentifier
+  DECLARE @accountID	userIdentifier
+
+  IF  @type != 1
+  AND @type != 2
+  AND @type != 4
+  AND @type != 8
+    RETURN 20004
+  IF @players < 2 OR @players > 256 
+    RETURN 20005
+
+  IF @type = 2 AND (@players < 4 OR @players > 32)
+    RETURN 20005	-- special restriction
+  /* 
+   * confirm that players is a power of 2
+   */
+  IF (((((@players * 2) - 1) ^ -1) | (@players - 1)) ^ -1) & @players != @players
+    RETURN 20006
+
+  IF @clientTZ = 0
+  BEGIN
+    SELECT @clientTZ = gmt
+      FROM vpusers..getGMT
+    IF @clientTZ IS NULL
+      SELECT @clientTZ = 0
+  END
+  SELECT @now          = dateadd( hour, (-1) * @clientTZ, getdate()     )
+  SELECT @startTime    = dateadd( hour, (-1) * @clientTZ, @startTime    )
+
+  -- IF @startTime <= @now
+    -- RETURN 20007
+   IF @startTime <= @now
+     SELECT @startTime = @now
+
+  BEGIN TRAN
+    IF NOT EXISTS (SELECT * FROM ladders l, notifyLists n
+		    WHERE l.notifyID = @notifyID
+		    AND l.notifyID = n.notifyID)
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20001		-- no such ladder
+    END
+
+    IF EXISTS (SELECT * FROM ladders l, notifyLists n
+		    WHERE l.notifyID = @notifyID
+		    AND l.notifyID = n.notifyID
+		    AND (locked = 1 OR deleted = 1))
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20002		-- ladder is locked
+    END
+
+    IF EXISTS (SELECT * FROM tournaments
+		    WHERE notifyID = @notifyID
+		    AND  startTime = @startTime)
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20003		-- duplicate event
+    END
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN @lastError
+    END
+
+    /*
+     * Debit the ladder owner's points for the added value
+     */
+    IF @addedValue IS NOT NULL AND @addedValue > 0
+    BEGIN
+      SELECT @userID = ownerID
+        FROM vpusers..userAccounts a, vpusers..services s, notifyLists n
+        WHERE n.notifyID = @notifyID
+        AND s.itemID     = n.notifyID
+        AND s.accountID  = a.accountID
+        AND s.type = 6
+      IF @userID IS NOT NULL
+      BEGIN
+        DECLARE @cost smallmoney
+        SELECT @cost = 0 - @addedValue
+        EXEC @lastError = vpusers..updateUserPoints @userID, @cost
+        IF @@trancount = 0 OR @lastError != 0
+        BEGIN
+          IF @@trancount > 0
+            ROLLBACK TRAN
+          RETURN 20008
+        END
+      END
+    END
+    
+    /* 
+     * Create a tournament record
+     */
+    INSERT tournaments
+      ( notifyID, type, players, status, title, roomURL, startTime,
+        timeLimit, currencyType, addedValue, buyIn, splitPrize )
+      VALUES ( @notifyID, @type, @players, 1, @title, @roomURL, @startTime,
+               @timeLimit, @currencyType, @addedValue, @buyIn, @splitPrize )
+
+    SELECT @tournID = @@identity
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN @lastError
+    END
+
+    /* If a tournament director was specified, 
+     * create a tournamentPlayers entry. This insures
+     * the TD will receive system-generated IMs 
+     * regarding this tournament.
+     */
+    IF @tdID IS NOT NULL
+    BEGIN
+      INSERT tournamentPlayers (tournID, userID, initialRating, won, lost, tied, td, buyIn, prizeShare, quit)
+        VALUES(@tournID, @tdID, 0, 0, 0, 0, 1, 0, 0, 0)
+
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN 
+        RETURN @lastError
+      END
+    END
+    
+  COMMIT TRAN 
+
+  /*
+   * Create the brackets. This is done in a separate stored procedure
+   * than can also be called to rebuild the brackets if the size of
+   * the tournament is changed.
+   */
+  EXEC @lastError = buildBrackets @tournID, @type, @players
+  IF @lastError != 0
+  BEGIN
+    RETURN @lastError
+  END
+
+  SELECT @accountID = accountID
+    FROM vpusers..services WHERE itemID = @notifyID and type=6
+  IF @accountID IS NOT NULL
+  BEGIN
+    EXEC vpusers..addAcctHistory @accountID, 62, @tournID
+  END
+
+  SELECT @tournID AS tournID
+  RETURN 0
+
+END
+GO

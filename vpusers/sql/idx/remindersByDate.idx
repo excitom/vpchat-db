@@ -1,0 +1,4 @@
+/* pre-account reminder notes */
+CREATE INDEX remindersByDate
+ON reminders ( notifyDate )
+GO

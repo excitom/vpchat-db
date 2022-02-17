@@ -1,0 +1,3 @@
+create index paypalEmailByEmail
+on paypalEmail ( email )
+GO

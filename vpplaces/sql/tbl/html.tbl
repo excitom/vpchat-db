@@ -1,0 +1,11 @@
+/*
+ * HTML fragments used in dynamic web pages
+ *
+ */
+CREATE TABLE html
+(
+	description	VARCHAR(128)
+			constraint isPrimary primary key,
+	sourceCode	TEXT	NULL
+)
+GO

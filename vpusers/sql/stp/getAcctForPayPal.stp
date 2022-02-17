@@ -1,0 +1,78 @@
+/*
+ * Find and account corresponding to an email address, for receiving a
+ * payment from Paypal.
+ *
+ * Normally this is simply the account's email. But if the account owner
+ * changes the email then we save the original email to allow Paypal
+ * payments to continue to correlate to this account.
+ *
+ * Note: Why is there a paypalEmail table and a paypal table? Because
+ * things have evolved. Really need to clean that up and consolodate ...
+ *
+ *  input:  email address
+ *    
+ *  output: 
+ *    20001 = unknown email
+ */
+IF EXISTS
+ (SELECT name FROM sysobjects WHERE name = 'getAcctForPayPal' AND type = 'P') 
+ DROP PROC getAcctForPayPal
+GO  
+CREATE PROC getAcctForPayPal ( @email longName )
+AS
+BEGIN
+  DECLARE @lastError int
+  DECLARE @ctr int
+
+  BEGIN TRAN
+
+    /*
+     * If there is a single active paypal subscription with this email,
+     * return the account ID. Otherwise, it's possible there are 
+     * multiple accounts associated with this email.
+     */
+     
+    SELECT @ctr = COUNT(accountID) FROM paypal p, subscriptions s
+       WHERE email = @email
+       AND   p.ccID = s.ccID
+       AND   type = 1
+       AND   autoRenew = 1
+
+    IF @ctr = 1
+    BEGIN
+      SELECT accountID FROM paypal p, subscriptions s
+        WHERE email = @email
+        AND   p.ccID = s.ccID
+        AND   type = 1
+        AND   autoRenew = 1
+      COMMIT TRAN
+      RETURN 0
+    END
+    
+    /*
+     * Note: multiple rows may come back. Return them all.
+     */
+    SELECT accountID FROM userAccounts WHERE email = @email
+    UNION
+    SELECT accountID FROM paypalEmail WHERE email = @email
+    UNION
+    SELECT accountID FROM paypal p, subscriptions s
+       WHERE email = @email
+       AND   p.ccID = s.ccID
+       AND   type = 1
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+  COMMIT TRAN
+END
+GO 
+IF OBJECT_ID('dbo.getAcctForPayPal') IS NOT NULL
+	PRINT '<<< CREATED PROCEDURE dbo.getAcctForPayPal >>>'
+ELSE
+	PRINT '<<< FAILED CREATING PROCEDURE dbo.getAcctForPayPal >>>'
+GO

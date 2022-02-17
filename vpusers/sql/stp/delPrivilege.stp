@@ -1,0 +1,20 @@
+/* --- delete a privilege for a user --- */
+CREATE PROC delPrivilege
+(
+  @nickName VPuserID,
+  @regMode VpRegMode,
+  @privilegeType integer
+)
+AS
+BEGIN
+ /* turn all user ID to lower case, to get case insensitive comparisons */
+ SELECT @nickName = lower(@nickName)
+
+ DELETE userPrivileges
+   FROM userPrivileges, users
+   WHERE userPrivileges.userID = users.userID	AND
+         users.nickName = @nickName		AND
+         users.registrationMode = @regMode	AND
+         privilegeType = @privilegeType
+END
+GO 

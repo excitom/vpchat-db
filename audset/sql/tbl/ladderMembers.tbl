@@ -1,0 +1,21 @@
+/*
+ * Game ladder members
+ *
+ */
+CREATE TABLE ladderMembers
+(
+	userID		userIdentifier		NOT NULL,
+	notifyID	userIdentifier		NOT NULL,
+	rank		int			NOT NULL,
+	won		int	DEFAULT 0	NOT NULL,
+	lost		int	DEFAULT 0	NOT NULL,
+	tied		int	DEFAULT 0	NOT NULL,
+	streak		int	DEFAULT 0	NOT NULL,
+	joinedDate	VpTime			NOT NULL,
+	lastGame	VpTime			NULL,
+	lastAged	VpTime			NULL,
+	pending		bit	DEFAULT 0,
+	email		longName		NULL,
+		CONSTRAINT uniqueMembers UNIQUE ( userID, notifyID )
+)
+GO

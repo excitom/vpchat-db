@@ -1,0 +1,139 @@
+/* Change the current status of a set of event interactions */
+/* input:  interactions list - ids separated by commas, 
+           new status - id for one of the statuses "DELETED","BROADCASTED","FORWARDED",
+                        "ATGUEST","READY" or "IDLE",
+           host name - name of host or guest if new status is "ATGUEST"
+   output: If the new status is BROADCASTED or ATGUEST, then the interactions 
+           for which the status is been changed are returned with the following columns:
+           interaction id, interaction type, sender name, text.
+           RETURNS 20001 if status is not in range 1..7, 
+                   20002 if the host given when forwarding is not a host, 
+                   0 otherwise.
+   16/06/97: Fix: when new status is FORWARDED, checks that the hostName 
+             has the appropriate privilege.
+*/
+CREATE PROC changeInteractionStatus( 
+               @interactions  longName,
+               @newStatus     numeric(2,0) ,
+               @hostName      VPuserID      )
+AS
+BEGIN
+  DECLARE @id varchar(15)
+  DECLARE @commaPos integer
+  DECLARE @lastError integer
+  DECLARE @atguest integer
+  DECLARE @broadcasted integer
+  DECLARE @forwarded integer
+  DECLARE @saveInter integer
+  DECLARE @iType varchar(16)
+  DECLARE @sender VPuserID
+  DECLARE @text longName
+
+  CREATE TABLE #interactions ( id numeric(10,0), itype varchar(16), sender varchar(20), text varchar(255) )
+
+  IF @newStatus < 1 OR @newStatus > 7 
+     RETURN 20001
+
+  SELECT @atguest = statusID 
+    FROM interactionStatus
+    WHERE name = "ATGUEST"
+  SELECT @lastError = @@error
+  IF @lastError != 0
+    RETURN @lastError
+
+  SELECT @broadcasted = statusID 
+    FROM interactionStatus
+    WHERE name = "BROADCASTED"
+  SELECT @lastError = @@error
+  IF @lastError != 0
+     RETURN @lastError
+
+  SELECT @forwarded = statusID 
+    FROM interactionStatus
+    WHERE name = "FORWARDED"
+  SELECT @lastError = @@error
+  IF @lastError != 0
+     RETURN @lastError
+
+  IF  (@newStatus = @atguest) OR (@newStatus = @broadcasted)
+    SELECT @saveInter = 1
+  ELSE
+    SELECT @saveInter = 0
+     
+  IF (@newStatus = @forwarded) 
+  BEGIN
+    DECLARE @hostPriv  privType 
+    DECLARE @isHost    int
+    SELECT @hostPriv = 273
+    EXEC vpusers..isPrivileged @hostName, @hostPriv, @isHost output
+    IF @isHost = 0 
+      RETURN 20002
+  END
+
+  BEGIN TRAN
+  /* parse list of interaction ids */
+  WHILE ( ascii( rtrim(ltrim(@interactions ))) > 32 ) BEGIN
+    SELECT @commaPos = patindex( "%,%", @interactions )
+    IF @commaPos = 0 BEGIN
+      SELECT @id = rtrim(ltrim(@interactions))
+      SELECT @interactions = ""
+    END
+    ELSE BEGIN
+      SELECT @id = rtrim( ltrim( substring( @interactions, 1, @commaPos-1 ) ) )
+      SELECT @interactions = substring( @interactions, @commaPos+1, 
+                                        char_length( @interactions ) - @commaPos )
+    END
+  
+    UPDATE eventInteractions
+      SET status = @newStatus, hostName = @hostName
+      FROM eventInteractions ( INDEX isPrimary )
+      WHERE interactionID = convert(numeric(10,0),@id)  
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+    END
+    
+    IF @saveInter = 1 
+    BEGIN 
+      SELECT @iType = name, @sender = senderName, @text = text
+      FROM eventInteractions ( INDEX isPrimary ), interactionsAllowed
+      WHERE interactionID = convert(numeric(10,0),@id) AND
+            interactionsAllowed.interactionType = eventInteractions.interactionType
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+  
+      INSERT #interactions 
+       ( id, itype,sender, text)
+      VALUES ( convert(numeric(10,0),@id) , @iType, @sender, @text )
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+    END
+
+  END /* of while */
+
+  IF @saveInter = 1
+  BEGIN
+    SELECT * FROM #interactions
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+  END
+  
+  COMMIT TRAN
+  
+  DROP TABLE #interactions
+
+END
+GO

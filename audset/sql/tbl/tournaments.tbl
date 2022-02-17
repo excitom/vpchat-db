@@ -1,0 +1,38 @@
+/*
+ * Game ladder tournaments
+ *
+ */
+CREATE TABLE tournaments
+(
+	tournID		userIdentifier		IDENTITY
+                        	CONSTRAINT isPrimary PRIMARY KEY,
+	notifyID	userIdentifier		NOT NULL,
+	title		longName		NULL,
+	roomURL		longName		NULL,
+	type		tinyint			NOT NULL,
+			-- 1 = single elimination
+			-- 2 = double elimination
+			-- 4 = round robin
+			-- 8 = swiss
+	status		tinyint			NOT NULL,
+			-- 0x01 = registration open
+			-- 0x02 = in progress
+			-- 0x04 = finished
+			-- 0x08 = cancelled
+			-- 0x10 = registration closed
+			-- 0x20 = between rounds
+			-- 0x40 = pending prize award
+	prizeAwarded	bit		DEFAULT 0,
+	players		smallint		NOT NULL,
+	startTime	VpTime			NOT NULL,
+	roundStarted	VpTime			NULL,
+	timeLimit	int			NOT NULL,
+	currencyType	tinyint			NOT NULL,
+			-- 0 = user points
+			-- 1 = real money
+	addedValue	smallmoney		NULL,
+	buyIn		smallmoney		NULL,
+	currentRound	tinyint		DEFAULT 0	NOT NULL,
+	splitPrize	bit		DEFAULT 0
+)
+GO

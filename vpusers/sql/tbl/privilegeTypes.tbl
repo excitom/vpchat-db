@@ -1,0 +1,7 @@
+CREATE TABLE privilegeTypes
+(
+	privilegeType	privType	NOT NULL
+                        constraint isPrimary primary key,
+	description	varchar(30)	NOT NULL
+)
+GO

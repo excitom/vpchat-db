@@ -1,0 +1,16 @@
+/*
+ * Historical record of subscribers to notify lists.
+ *
+ * This is used for the "notify on new subscriber join" lists
+ * to prevent someone from spamming by repeated join/quit/join. 
+ *
+ * This list may be truncated periodically, based on subscrTime.
+ */
+CREATE TABLE notifySubscrHistory
+(
+	userID		userIdentifier		NOT NULL,
+	notifyID	userIdentifier		NOT NULL,
+	subscrTime	VpTime			NOT NULL,
+		CONSTRAINT uniqueNotify UNIQUE ( userID, notifyID )
+)
+GO

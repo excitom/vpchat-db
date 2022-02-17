@@ -1,0 +1,5 @@
+/* index configuration keys -
+   by service and type */
+CREATE UNIQUE INDEX configurationIdx
+ON configurationKeys ( belongsTo, type, keyID )
+GO

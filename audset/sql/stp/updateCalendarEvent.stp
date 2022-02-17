@@ -1,0 +1,70 @@
+/* Copyright 2005 Tom Lang, All right reserved */
+/*
+ * Update a calendar event
+ *
+ * Tom Lang 3/2005
+ */
+IF EXISTS(SELECT name FROM sysobjects WHERE name='updateCalendarEvent' AND type='P')
+ DROP PROC updateCalendarEvent
+GO
+CREATE PROC updateCalendarEvent (
+  @eventID	userIdentifier,
+  @startDate	dateTime,
+  @description	longName,
+  @type		integer,
+  @repeat	char(1),
+  @allDay	bit,
+  @clientTZ	integer = NULL,
+  @endDate	dateTime = NULL,
+  @URL	        longName = NULL
+)
+AS
+BEGIN
+  DECLARE @lastError	integer
+  DECLARE @diffFromGMT	integer
+
+  IF NOT EXISTS(SELECT eventID FROM events WHERE eventID = @eventID)
+    RETURN 20000
+
+  IF @clientTZ IS NULL
+  BEGIN
+    SELECT @diffFromGMT = intValue
+      FROM vpusers..configurationKeys
+      WHERE keyName = 'diffFromGMT'
+  END
+  ELSE
+    SELECT @diffFromGMT = @clientTZ
+
+  SELECT @startDate = dateadd( hour, (-1) * @diffFromGMT, @startDate )
+  IF @endDate IS NOT NULL
+    SELECT @endDate = dateadd( hour, (-1) * @diffFromGMT, @endDate )
+
+  BEGIN TRAN
+    UPDATE calendar 
+      SET description = @description,
+          type        = @type,
+          repeat      = @repeat,
+          allDay      = @allDay,
+          startDate   = @startDate,
+          endDate     = @endDate,
+          URL         = @URL
+      WHERE eventID   = @eventID
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+  COMMIT TRAN
+
+END
+GO
+GRANT EXECUTE ON updateCalendarEvent TO vpusr
+GO
+IF OBJECT_ID('dbo.updateCalendarEvent') IS NOT NULL
+	PRINT '<<< CREATED PROCEDURE dbo.updateCalendarEvent >>>'
+ELSE
+	PRINT '<<< FAILED CREATING PROCEDURE dbo.updateCalendarEvent >>>'
+GO

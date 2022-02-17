@@ -1,0 +1,84 @@
+/* add (or update if an entry with the same serial 
+   number already exists) the record for a
+   vp places list item. */
+/* input:  serial number in list,
+           URL, title, usage, type, replicate count, capacity
+
+   output: NONE
+*/
+CREATE PROC addVpPlace
+(
+  @serialNumber	integer,
+  @url		varchar(255),
+  @title	varchar(255),
+  @type		integer,
+  @repCount 	integer,
+  @capacity     integer,
+  @Rusage	integer,
+  @Cusage	integer
+)
+AS
+BEGIN  
+  DECLARE @lastError int
+  DECLARE @insideTransaction int
+  DECLARE @matchFound bit
+
+  IF ( @@trancount > 0 )
+    SELECT @insideTransaction = 1
+  ELSE 
+    SELECT @insideTransaction = 0
+
+  IF ( @insideTransaction = 0 )
+    BEGIN TRAN addVpPlace
+
+    /* first check if the auditorium exists */
+    IF EXISTS (
+      SELECT serialNumber
+        FROM vpPlacesList
+        WHERE serialNumber = @serialNumber )
+      SELECT @matchFound = 1
+    ELSE
+      SELECT @matchFound = 0
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      raiserror @lastError
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+    
+    IF @matchFound = 1
+    BEGIN
+      /* update existing entry */
+      UPDATE vpPlacesList
+        SET title = @title,
+            URL = @url,
+            roomUsage = @Rusage,
+            corrUsage = @Cusage,
+            type = @type,
+            capacity = @capacity,
+            repCount = @repCount
+        FROM vpPlacesList
+        WHERE serialNumber = @serialNumber
+    END
+    ELSE
+    BEGIN
+      /* insert a new entry */
+      INSERT vpPlacesList
+        VALUES ( @serialNumber, @url, @title, @Rusage, @Cusage, 
+                 @type, @capacity, @repCount )
+    END
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      raiserror @lastError
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+    
+  IF ( @insideTransaction = 0 )
+    COMMIT TRAN addVpPlace
+END
+GO

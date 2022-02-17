@@ -1,0 +1,78 @@
+/* add (or update if an entry with the same date 
+   	already exists) the record for a
+   Places-usage list. */
+
+CREATE PROC addPlaceUsage
+(
+  @date		smalldateTime,
+  @URL		varchar(255),
+  @title	varchar(255),
+  @RoomUsage	integer,
+  @CorrUsage	integer
+)
+AS
+BEGIN  
+  DECLARE @lastError int
+  DECLARE @insideTransaction int
+  DECLARE @matchFound bit
+
+  DECLARE @prevRoom integer
+  DECLARE @prevCorr integer
+
+  IF ( @@trancount > 0 )
+    SELECT @insideTransaction = 1
+  ELSE 
+    SELECT @insideTransaction = 0
+
+  IF ( @insideTransaction = 0 )
+    BEGIN TRAN addPtgItem
+
+  /* first check if the placeusage */
+  IF EXISTS (
+    SELECT time
+      FROM placeUsage
+      WHERE time = @date
+	AND URL = @URL )
+    SELECT @matchFound = 1
+  ELSE
+    SELECT @matchFound = 0
+  
+  SELECT @lastError = @@error
+  IF @lastError != 0
+  BEGIN
+    raiserror @lastError
+    ROLLBACK TRAN
+    RETURN @lastError
+  END
+    
+  IF @matchFound = 1
+  BEGIN
+    /* update existing entry */
+    UPDATE placeUsage
+      SET title = @title,
+          URL = @URL,
+          roomUsage = roomUsage+@RoomUsage,
+          corridorUsage = corridorUsage+@CorrUsage
+      FROM placeUsage
+      WHERE time = @date
+	AND URL = @URL
+  END
+  ELSE
+  BEGIN
+    /* insert a new entry */
+    INSERT placeUsage
+      VALUES ( @date, @URL, @title, @RoomUsage, @CorrUsage )
+  END
+
+  SELECT @lastError = @@error
+  IF @lastError != 0
+  BEGIN
+    raiserror @lastError
+    ROLLBACK TRAN
+    RETURN @lastError
+  END
+    
+  IF ( @insideTransaction = 0 )
+    COMMIT TRAN addPtgItem
+END
+GO

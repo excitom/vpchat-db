@@ -1,0 +1,397 @@
+/*
+ * Add a new game ladder, which implicitly adds a private alert list.
+ *
+ * Output: 0 = success
+ *         1 = success, list had been deleted
+ *         20000 = duplicate description
+ *         20001 = restoring a deleted ladder but the 
+ *           ladder name does not match the original
+ *         20002 = attempt to restore a deleted ladder failed
+ *         20003 = duplicate ladder name
+ *         20004 = unknown user name
+ *         20005 = invalid account status for this action
+ */
+IF EXISTS
+ (SELECT name FROM sysobjects WHERE name = 'addLadder' AND type = 'P') 
+ DROP PROC addLadder
+GO  
+CREATE PROC addLadder ( 
+	@ladderName	longName,
+	@nickName	VPuserID,	  -- list owner's name
+	@accountID	userIdentifier,   -- list owner's account
+	@gameTypeID	userIdentifier,
+	@subheader	longName,
+	@URL		longName = NULL,
+	@imageURL	longName = NULL,
+	@unlisted	bit = 0,
+	@approvalRqd	bit = 0,
+	@adultContent	bit = 0,
+	@loserRankOpt	bit = 0
+)
+AS
+BEGIN
+  DECLARE @lastError	int
+  DECLARE @rc		int
+  DECLARE @accountStatus	int
+  DECLARE @notifyID	userIdentifier
+  DECLARE @userID	userIdentifier
+  DECLARE @deleted	bit
+  DECLARE @diffFromGMT	int
+  DECLARE @now		VpTime
+  DECLARE @type		int
+	
+  SELECT  @type = 0x00000140	-- list type = private, game ladder
+
+  /* Remove extraneous white space from strings */
+
+  SELECT @subheader   = ltrim(@subheader)
+  SELECT @URL         = ltrim(@URL)
+  SELECT @imageURL    = ltrim(@imageURL)
+  SELECT @subheader   = rtrim(@subheader)
+  SELECT @URL         = rtrim(@URL)
+  SELECT @imageURL    = rtrim(@imageURL)
+  SELECT @nickName    = lower(@nickName)
+  SELECT @nickName    = ltrim(@nickName)
+
+  /* get date/time stamp */
+
+  SELECT @diffFromGMT = gmt
+    FROM vpusers..getGMT
+  IF @diffFromGMT IS NULL
+    SELECT @diffFromGMT = 0
+
+  SELECT @now = dateadd( hour, (-1) * @diffFromGMT, getdate() )
+
+  /* Find ladder config defaults */
+
+  DECLARE @maxPlayers int
+  SELECT @maxPlayers = intValue
+    FROM vpusers..configurationKeys
+    WHERE keyName = 'ladderMaxPlayers'
+
+  IF @maxPlayers IS NULL
+  BEGIN
+    SELECT @maxPlayers = 0
+  END
+
+  DECLARE @decayRate int
+  SELECT @decayRate = intValue
+    FROM vpusers..configurationKeys
+    WHERE keyName = 'ladderDecayRate'
+
+  IF @decayRate IS NULL
+  BEGIN
+    SELECT @decayRate = 0
+  END
+
+  DECLARE @decayIntrvl int
+  SELECT @decayIntrvl = intValue
+    FROM vpusers..configurationKeys
+    WHERE keyName = 'ladderDecayIntrvl'
+
+  IF @decayIntrvl IS NULL
+  BEGIN
+    SELECT @decayIntrvl = 0
+  END
+
+  DECLARE @gainPct int
+  SELECT @gainPct = intValue
+    FROM vpusers..configurationKeys
+    WHERE keyName = 'ladderGainPct'
+
+  IF @gainPct IS NULL
+  BEGIN
+    SELECT @gainPct = 50
+  END
+
+  DECLARE @chalRange int
+  SELECT @chalRange = intValue
+    FROM vpusers..configurationKeys
+    WHERE keyName = 'ladderChalRange'
+
+  IF @chalRange IS NULL
+  BEGIN
+    SELECT @chalRange = 100
+  END
+
+  /* Find default message limits */
+
+  DECLARE @maxMsgs int
+  SELECT @maxMsgs = intValue
+    FROM vpusers..configurationKeys
+    WHERE keyName = 'userAlertMsgLimit'
+
+  IF @maxMsgs IS NULL
+  BEGIN
+    SELECT @maxMsgs = 1
+  END
+
+  DECLARE @msgInterval	int
+  SELECT @msgInterval = intValue
+    FROM vpusers..configurationKeys
+    WHERE keyName = 'userAlertMsgIntrvl'
+
+  IF @msgInterval IS NULL
+  BEGIN
+    SELECT @msgInterval = 1
+  END
+
+  BEGIN TRAN
+
+    /* Confirm the owner name is valid */
+
+    SELECT @userID    = vpusers..users.userID,
+           @accountID = accountID
+      FROM vpusers..users, vpusers..registration
+      WHERE nickName = @nickName
+        AND registrationMode = 2
+        AND locked = 0
+        AND vpusers..users.userID = vpusers..registration.userID
+
+    IF @userID IS NULL
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20004
+    END
+
+    /* Confirm the account is valid and the status is OK */
+
+    SELECT @accountStatus = accountStatus
+      FROM vpusers..userAccounts
+      WHERE accountID = @accountID
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    IF @accountStatus != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20005
+    END
+
+    /* Check for duplicate description */
+
+    SELECT @notifyID = notifyID, @deleted = deleted
+      FROM notifyLists
+      WHERE description = @ladderName
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    IF @notifyID IS NOT NULL
+    BEGIN
+      IF @deleted = 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN 20000
+      END
+
+      /* Restoring a deleted ladder */
+
+      IF NOT EXISTS(
+         SELECT * FROM privateLists
+          WHERE notifyID = @notifyID)
+      BEGIN
+        ROLLBACK TRAN
+        RETURN 20002		-- original list wasn't a private list
+      END
+
+      IF NOT EXISTS(
+         SELECT * FROM ladders
+          WHERE notifyID = @notifyID
+          AND   ladderName = @ladderName)
+      BEGIN
+        ROLLBACK TRAN
+        RETURN 20001		-- ladder name mismatch
+      END
+
+      /* OK to restore the ladder */
+
+      UPDATE notifyLists
+        SET deleted = 0, locked = 1, type = @type, subheader = @subheader
+        WHERE notifyID = @notifyID
+
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+
+      UPDATE privateLists 
+        SET URL = @URL, unlisted = @unlisted, approvalRqd = @approvalRqd, adultContent = @adultContent
+        WHERE notifyID = @notifyID
+
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+
+      UPDATE ladders SET imageURL = @imageURL,
+			gameTypeID = @gameTypeID,
+			maxPlayers = @maxPlayers,
+			decayRate = @decayRate,
+			decayInterval = @decayIntrvl,
+			gainPercentage = @gainPct,
+			challengeRange = @chalRange,
+			createdDate = @now,
+			loserRankOpt = @loserRankOpt,
+			closed = 0
+		WHERE notifyID = @notifyID
+
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+
+      SELECT @rc = 1
+    END
+
+    /* Creating a new ladder */
+
+    ELSE BEGIN
+
+      IF EXISTS( SELECT * FROM ladders WHERE ladderName = @ladderName)
+      BEGIN
+        ROLLBACK TRAN
+        RETURN 20003
+      END
+
+      /* step 1 - create the notify list */
+
+      INSERT notifyLists ( description, subheader, locked, deleted, type )
+        VALUES ( @ladderName, @subheader, 1, 0, @type )
+
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+
+      SELECT @notifyID = @@identity
+
+      /* step 2 - make it a private list */
+
+      INSERT privateLists (notifyID, URL, unlisted, approvalRqd, adultContent)
+        VALUES ( @notifyID, @URL, @unlisted, @approvalRqd, @adultContent )
+
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+
+      /* step 3 - make it a ladder */
+
+      INSERT INTO ladders (notifyID,
+			ladderName,
+			imageURL,
+			gameTypeID,
+			maxPlayers,
+			decayRate,
+			decayInterval,
+			gainPercentage,
+			challengeRange,
+			createdDate,
+			loserRankOpt,
+			closed)
+		VALUES( @notifyID,
+			@ladderName,
+			@imageURL,
+			@gameTypeID,
+			@maxPlayers,
+			@decayRate,
+			@decayIntrvl,
+			@gainPct,
+			@chalRange,
+			@now,
+			@loserRankOpt,
+			0)
+
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+
+      SELECT @rc = 0
+    END
+
+    /* Give the owner privilege to use the alert list */
+
+    INSERT notifyAccessList (notifyID, userID, accountID, maxMsgs, msgInterval, msgCount, locked, accessPriv)
+        VALUES (@notifyID, @userID, @accountID, @maxMsgs, @msgInterval, 0, 0, 0x1F)
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    /* Add the ladder owner to the ladder
+     * (Unless the owner belongs to another ladder of this type.)
+     */
+    IF NOT EXISTS( SELECT * FROM ladders l, ladderMembers m
+			WHERE userID = @userID
+			AND m.notifyID = l.notifyID
+			AND gameTypeID = @gameTypeID)
+
+    BEGIN
+      INSERT INTO ladderMembers (notifyID,
+				userID,
+				joinedDate,
+				rank,
+				won, lost, tied)
+			VALUES (@notifyID,
+				@userID,
+				@now,
+				0,
+				0,0,0)
+
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+
+      /* Subscribe the owner to the alert list */
+
+      INSERT notifySubscrs (notifyID, userID, notifyPref)
+          VALUES(@notifyID, @userID, 15)
+
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+    END
+
+    /* Return the list ID */
+
+    SELECT @notifyID AS notifyID
+
+  COMMIT TRAN
+
+  EXEC vpusers..addAcctHistory @accountID, 60, @notifyID
+
+  RETURN @rc
+END
+GO

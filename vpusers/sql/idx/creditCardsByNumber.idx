@@ -1,0 +1,4 @@
+/* index credit card information users by credit card number */
+create index creditCardsByNumber
+on creditCards ( Ecom_card_number )
+GO

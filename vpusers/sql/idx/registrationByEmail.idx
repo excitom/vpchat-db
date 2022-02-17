@@ -1,0 +1,4 @@
+/* index registrered users by email */
+create index registrationByEmailIdx
+on registration ( email )
+GO

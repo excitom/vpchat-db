@@ -1,0 +1,39 @@
+/* Copyright 2005 Tom Lang, All right reserved */
+/*
+ * Return information about a scheduled event
+ *
+ * Tom Lang 3/2005
+ */
+IF EXISTS(SELECT name FROM sysobjects WHERE name='getCalendarEvent' AND type='P')
+ DROP PROC getCalendarEvent
+GO
+CREATE PROC getCalendarEvent (
+  @eventID	userIdentifier,
+  @clientTZ	integer = NULL
+)
+AS
+BEGIN
+  DECLARE @diffFromGMT	integer
+  IF @clientTZ IS NOT NULL
+    SELECT @diffFromGMT = @clientTZ
+  ELSE
+    SELECT @diffFromGMT = intValue
+      FROM vpusers..configurationKeys
+      WHERE keyName = 'diffFromGMT'
+
+  SELECT eventID,
+       dateadd( hour, @diffFromGMT, startDate) AS startDate,
+       dateadd( hour, @diffFromGMT, endDate) AS endDate,
+       type, repeat, allDay, repeat,
+       description, URL
+    FROM calendar
+    WHERE eventID = @eventID
+END
+GO
+GRANT EXECUTE ON getCalendarEvent TO vpusr
+GO
+IF OBJECT_ID('dbo.getCalendarEvent') IS NOT NULL
+	PRINT '<<< CREATED PROCEDURE dbo.getCalendarEvent >>>'
+ELSE
+	PRINT '<<< FAILED CREATING PROCEDURE dbo.getCalendarEvent >>>'
+GO

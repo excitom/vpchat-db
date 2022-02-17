@@ -1,0 +1,17 @@
+/*
+ * This table contains extended data for Notify Alert Lists that
+ * are privately owned by customers.
+ *
+ */
+CREATE TABLE privateLists
+(
+	notifyID	userIdentifier	NOT NULL
+                        	CONSTRAINT isPrimary PRIMARY KEY,
+	URL		UrlType		NULL,
+	unlisted	bit		NOT NULL,
+	-- this refers to public listing in a directory of lists
+	approvalRqd	bit		NOT NULL,
+	-- this indicates if the owner's approval is requried to subscribe
+	adultContent	bit		NOT NULL
+)
+GO

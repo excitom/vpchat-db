@@ -1,0 +1,10 @@
+CREATE TABLE payments
+(
+	paymentID	userIdentifier			IDENTITY
+                        	constraint isPrimary primary key,
+	accountID	userIdentifier			NOT NULL,
+	paymentDate	VpTime				NOT NULL,
+	amount		smallmoney			NOT NULL,
+	comment		longName			NULL
+)
+GO

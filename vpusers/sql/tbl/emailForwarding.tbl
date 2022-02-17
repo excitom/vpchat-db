@@ -1,0 +1,19 @@
+/*
+ * This table keeps track of email forwarding user names
+ *
+ * A limited number of users can set up forwarding for a single
+ * service add-on. For example, up to 5 names may forward mail
+ * with on add-on. If an account has 10 names, then 2 forwarding
+ * add-ons are required.
+ *
+ */
+CREATE TABLE emailForwarding
+(
+	userID		userIdentifier			NOT NULL
+                        constraint isPrimary primary key,
+	serviceID	userIdentifier			NOT NULL,
+	email		longName			NOT NULL,
+	locked		bit		DEFAULT 0
+)
+ON userDetailsSeg
+GO

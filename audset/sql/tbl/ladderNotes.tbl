@@ -1,0 +1,12 @@
+/*
+ * HTML fragments used in dynamic web pages for Game Ladders
+ *
+ */
+CREATE TABLE ladderNotes
+(
+        notifyID	userIdentifier	NOT NULL,
+	lastPost	VpTime		NOT NULL,
+	noteOrder	tinyint		NOT NULL,
+        sourceCode      varchar(255)	NULL
+)
+GO

@@ -1,0 +1,15 @@
+/*
+ * This is a vestigial relic
+ */
+CREATE PROC addAcctHistoryByName ( 
+	@nickName 	VPuserID,
+	@comment	longName,
+	@IP   		varchar(20) = NULL,
+	@who		VPuserID = NULL,
+	@time		VpTime = NULL
+)
+AS
+BEGIN
+  EXEC addActivityLogByName @nickName, @comment, @IP, @who
+END
+GO

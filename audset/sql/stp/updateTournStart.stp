@@ -1,0 +1,25 @@
+/*
+ * Update the start time for a tournament
+ */
+IF EXISTS
+ (SELECT name FROM sysobjects WHERE name = 'updateTournStart' AND type = 'P') 
+ DROP PROC updateTournStart
+GO  
+CREATE PROC updateTournStart (
+  @tournID	userIdentifier,
+  @startTime	VpTime,
+  @clientTZ	int=0
+)
+AS
+BEGIN
+  IF @clientTZ = 0
+  BEGIN
+    SELECT @clientTZ = gmt
+      FROM vpusers..getGMT
+    IF @clientTZ IS NULL
+      SELECT @clientTZ = 0
+  END
+  SELECT @startTime = dateadd( hour, (-1) * @clientTZ, @startTime )
+  UPDATE tournaments SET startTime = @startTime WHERE tournID = @tournID
+END
+GO

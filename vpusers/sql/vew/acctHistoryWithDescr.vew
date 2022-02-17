@@ -1,0 +1,11 @@
+CREATE VIEW acctHistoryWithDescr
+AS
+  SELECT a1.time      AS time,
+	 a1.accountID AS accountID,
+	 d1.comment   AS reason,
+	 a1.value     AS value,
+	 a1.comment   AS comment
+  FROM accountHistory d1, accountHistory a1
+  WHERE d1.accountID = 0
+  AND   d1.reason = a1.reason
+GO

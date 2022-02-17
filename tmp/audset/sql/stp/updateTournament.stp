@@ -1,0 +1,982 @@
+/*
+ * Update tournament status
+ *
+ * Input: tournID
+ *        new status
+ *        flag: 1 = increment round
+ *        flag: 1 = override consistency checking
+ *
+ *  Status:
+ *  0x01 = open for registration
+ *  0x02 = started
+ *  0x04 = finished
+ *  0x08 = cancelled
+ *  0x10 = registration closed
+ *  0x20 = between rounds
+ *  0x40 = finished, pending prize award
+ *
+ * Output: 0 = success
+ *         20000 = no such tournament
+ *         20001 = invalid status
+ *         20002 = can't reopen registration
+ *         20003 = can't restart
+ *         20004 = can't finish
+ *         20005 = can't close registration
+ *         20006 = can't end round
+ */
+IF EXISTS
+ (SELECT name FROM sysobjects WHERE name = 'updateTournament' AND type = 'P') 
+ DROP PROC updateTournament
+GO  
+CREATE PROC updateTournament (
+  @tournID	userIdentifier,
+  @status	tinyint,
+  @incRound	bit=0,
+  @force	bit=0
+)
+AS
+BEGIN
+  DECLARE @lastError	integer
+  DECLARE @oldStatus	tinyint
+  DECLARE @type		tinyint
+  DECLARE @round	integer
+  DECLARE @diffFromGMT	integer
+  DECLARE @gameNum	smallint
+  DECLARE @seed		smallint
+  DECLARE @nextRound	tinyint
+  DECLARE @userID	userIdentifier
+  DECLARE @userID2	userIdentifier
+  DECLARE @notifyID	userIdentifier
+  DECLARE @bracketType	tinyint
+  DECLARE @accountID	userIdentifier
+  DECLARE @prize	smallmoney
+  DECLARE @prize2	smallmoney
+  DECLARE @addedValue	smallmoney
+  DECLARE @prizeAwarded bit
+  DECLARE @hiPoints	integer
+  DECLARE @prizeShare	float
+  DECLARE @count	int
+  DECLARE @quitterID	userIdentifier
+  DECLARE @rating	int
+
+  SELECT @accountID = accountID		-- used later for account history
+    FROM vpusers..services, tournaments
+      WHERE tournID = @tournID
+      AND vpusers..services.itemID = tournaments.notifyID
+      AND vpusers..services.type = 6
+
+  SELECT @diffFromGMT = gmt
+    FROM vpusers..getGMT
+  IF @diffFromGMT IS NULL
+    SELECT @diffFromGMT = 0
+
+  BEGIN TRAN
+    SELECT @oldStatus = NULL
+    SELECT @oldStatus = status, @type = type,
+           @addedValue = addedValue, @prizeAwarded = prizeAwarded
+      FROM tournaments
+      WHERE tournID = @tournID
+
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+-- select 'update tournament, old status', @oldStatus, 'new', @status
+
+    IF @oldStatus IS NULL
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20000
+    END
+
+    /* Open for registration */
+
+    IF @status = 0x01
+    BEGIN
+      IF @oldStatus != 0x10 AND @force != 1
+      BEGIN
+        ROLLBACK TRAN
+        RETURN 20002
+      END
+
+      UPDATE tournaments SET status = @status WHERE tournID = @tournID
+
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+
+      UPDATE brackets SET player = NULL
+        WHERE tournID = @tournID
+        AND   round = 1
+        AND   player = 0
+
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+
+      COMMIT TRAN
+ 
+      RETURN 0
+    END			-- open for registration
+
+    /* In progress */
+
+    IF @status = 0x02
+    BEGIN
+      IF @oldStatus != 0x10 AND @oldStatus != 0x20 AND @oldStatus != 0x40 AND @force != 1
+      BEGIN
+        ROLLBACK TRAN
+        RETURN 20003
+      END
+
+      IF @incRound = 1
+      BEGIN
+
+        SELECT @round = currentRound FROM tournaments WHERE tournID = @tournID
+
+        SELECT @lastError = @@error
+        IF @lastError != 0
+        BEGIN
+          ROLLBACK TRAN
+          RETURN @lastError
+        END
+
+        /* Tournament starting, update the start time */
+
+        SELECT @round = @round + 1
+        IF @round = 1
+        BEGIN
+
+          UPDATE tournaments
+            SET    startTime = dateadd( hour, (-1) * @diffFromGMT, getdate() ),
+                roundStarted = dateadd( hour, (-1) * @diffFromGMT, getdate() ),
+                currentRound = @round,
+                      status = @status
+            WHERE tournID = @tournID
+        END
+        ELSE BEGIN
+          UPDATE tournaments
+            SET roundStarted = dateadd( hour, (-1) * @diffFromGMT, getdate() ),
+                currentRound = @round,
+                      status = @status
+            WHERE tournID = @tournID
+        END
+
+        SELECT @lastError = @@error
+        IF @lastError != 0
+        BEGIN
+          ROLLBACK TRAN
+          RETURN @lastError
+        END
+
+        /* Check for BYEs, award victories */
+
+        IF EXISTS (SELECT * FROM brackets WHERE tournID = @tournID AND round = @round AND player = 0)
+        BEGIN
+          DECLARE playerCursor CURSOR
+            FOR SELECT gameNum, bracketType
+              FROM brackets
+              WHERE tournID = @tournID
+              AND round     = @round
+              AND player    = 0
+
+          SELECT @nextRound = @round + 1
+
+          OPEN playerCursor
+          FETCH playerCursor INTO @gameNum, @bracketType
+          WHILE ( @@sqlstatus = 0 ) 
+          BEGIN
+
+            UPDATE brackets
+              SET winner = 1
+              WHERE   tournID = @tournID
+              AND       round = @round
+              AND     gameNum = @gameNum
+              AND bracketType = @bracketType
+              AND seed IN (SELECT min(seed)
+                            FROM brackets
+                            WHERE   tournID = @tournID
+                            AND       round = @round
+                            AND     gameNum = @gameNum
+                            AND bracketType = @bracketType)
+
+            SELECT @lastError = @@error
+            IF @lastError != 0
+            BEGIN
+              ROLLBACK TRAN
+              RETURN @lastError
+            END
+
+            /* Find the winner's userID */
+            SELECT @userID = NULL
+            SELECT @userID = player, @seed = seed
+              FROM brackets
+              WHERE   tournID = @tournID
+              AND       round = @round 
+              AND     gameNum = @gameNum
+              AND bracketType = @bracketType
+              AND      winner = 1
+
+            SELECT @lastError = @@error
+            IF @lastError != 0
+            BEGIN
+              ROLLBACK TRAN
+              RETURN @lastError
+            END
+
+            /* Propagate winner to next bracket */
+
+            IF @userID IS NOT NULL
+            AND EXISTS (SELECT * FROM brackets WHERE tournID = @tournID AND round = @nextRound)
+            BEGIN
+              UPDATE brackets
+                SET    player = @userID
+                WHERE tournID = @tournID
+                AND     round = @nextRound
+                AND      seed = @seed
+
+              SELECT @lastError = @@error
+              IF @lastError != 0
+              BEGIN
+                ROLLBACK TRAN
+                RETURN @lastError
+              END
+            END
+
+            /* IF Swiss or Round Robin, propagate the BYE to
+             * the next round.
+             */
+            IF (@type = 0x04 OR @type = 0x08)
+            AND EXISTS (SELECT *
+                         FROM brackets
+                         WHERE    tournID = @tournID
+                         AND        round = @nextRound)
+            BEGIN
+
+              /* Give the winner credit for the "win" */
+              UPDATE tournamentPlayers
+                SET won = won + 1
+                WHERE tournID = @tournID
+                AND    userID = @userID
+                AND        td = 0
+
+              SELECT @lastError = @@error
+              IF @lastError != 0
+              BEGIN
+                ROLLBACK TRAN
+                RETURN @lastError
+              END
+
+              SELECT @userID = 0
+
+              SELECT @seed = max(seed)
+                FROM brackets
+                WHERE tournID   = @tournID
+                AND     round   = @round 
+                AND   gameNum   = @gameNum
+
+              SELECT @lastError = @@error
+              IF @lastError != 0
+              BEGIN
+                ROLLBACK TRAN
+                RETURN @lastError
+              END
+
+              UPDATE brackets
+                SET player = @userID
+                WHERE tournID = @tournID
+                AND     round = @nextRound
+                AND      seed = @seed
+
+              SELECT @lastError = @@error
+              IF @lastError != 0
+              BEGIN
+                ROLLBACK TRAN
+                RETURN @lastError
+              END
+            END
+          
+            /* If there is a losers bracket, and the bye is in the
+             * winners bracket, propagate the bye to the losers bracket.
+             */
+            IF EXISTS (SELECT *
+                         FROM brackets
+                         WHERE    tournID = @tournID
+                         AND        round = @nextRound
+                         AND  bracketType = 1     -- next round losers bracket
+                         AND @bracketType = 0)    -- this round NOT losers brack
+            BEGIN
+
+              SELECT @userID = 0
+
+              SELECT @seed = max(seed)
+                FROM brackets
+                WHERE tournID   = @tournID
+                AND     round   = @round 
+                AND   gameNum   = @gameNum
+                AND bracketType = @bracketType
+
+              SELECT @lastError = @@error
+              IF @lastError != 0
+              BEGIN
+                ROLLBACK TRAN
+                RETURN @lastError
+              END
+
+              UPDATE brackets
+                SET player = @userID
+                WHERE tournID = @tournID
+                AND     round = @nextRound
+                AND      seed = @seed
+
+              SELECT @lastError = @@error
+              IF @lastError != 0
+              BEGIN
+                ROLLBACK TRAN
+                RETURN @lastError
+              END
+            END
+
+            FETCH playerCursor INTO @gameNum, @bracketType
+          END
+          CLOSE playerCursor
+          DEALLOCATE CURSOR playerCursor
+        END
+
+        /* Check for quitters, punish them,
+         * and award victories to their opponents */
+
+        IF EXISTS (SELECT * FROM tournamentPlayers WHERE tournID = @tournID AND quit = 1)
+        BEGIN
+          DECLARE quitterCursor CURSOR
+            FOR SELECT userID
+              FROM tournamentPlayers
+              WHERE tournID = @tournID
+              AND      quit = 1
+
+          OPEN quitterCursor
+          FETCH quitterCursor INTO @quitterID
+          WHILE (@@sqlstatus = 0 )
+          BEGIN
+            DECLARE gameCursor CURSOR
+              FOR SELECT gameNum, bracketType
+                FROM brackets
+                WHERE tournID = @tournID
+                AND round     = @round
+                AND player    = @quitterID
+
+            SELECT @nextRound = @round + 1
+
+            OPEN gameCursor
+            FETCH gameCursor INTO @gameNum, @bracketType
+            WHILE ( @@sqlstatus = 0 ) 
+            BEGIN
+
+              /* If a quitter comes up against a BYE, previous BYE
+               * processing has already set the quitter as the winner so
+               * we should skip ahead to avoid declaring the BYE as 
+               * winner of this game too */
+              IF EXISTS (SELECT * FROM brackets
+                           WHERE   tournID = @tournID
+                           AND       round = @round
+                           AND     gameNum = @gameNum
+                           AND bracketType = @bracketType
+                           AND      winner = 1)
+              BEGIN
+                FETCH gameCursor INTO @gameNum, @bracketType
+                CONTINUE
+              END
+
+              /* Find the winner's userID */
+              SELECT @userID = player
+                FROM brackets
+                WHERE   tournID = @tournID
+                AND       round = @round
+                AND     gameNum = @gameNum
+                AND bracketType = @bracketType
+                AND     player != @quitterID
+
+              SELECT @seed = min(seed)
+                FROM brackets
+                WHERE   tournID = @tournID
+                AND       round = @round
+                AND     gameNum = @gameNum
+                AND bracketType = @bracketType
+
+              SELECT @lastError = @@error
+              IF @lastError != 0
+              BEGIN
+                ROLLBACK TRAN
+                RETURN @lastError
+              END
+
+              UPDATE brackets
+                SET winner = 1
+                WHERE   tournID = @tournID
+                AND       round = @round
+                AND     gameNum = @gameNum
+                AND bracketType = @bracketType
+                AND      player = @userID
+
+              SELECT @lastError = @@error
+              IF @lastError != 0
+              BEGIN
+                ROLLBACK TRAN
+                RETURN @lastError
+              END
+
+              /* Propagate winner to next bracket */
+
+              IF EXISTS (SELECT * FROM brackets WHERE tournID = @tournID AND round = @nextRound)
+              BEGIN
+                UPDATE brackets
+                  SET    player = @userID
+                  WHERE tournID = @tournID
+                  AND     round = @nextRound
+                  AND      seed = @seed
+
+                SELECT @lastError = @@error
+                IF @lastError != 0
+                BEGIN
+                  ROLLBACK TRAN
+                  RETURN @lastError
+                END
+              END
+
+              /* IF Swiss or Round Robin, propagate the quitter to
+               * the next round.
+               */
+              IF (@type = 0x04 OR @type = 0x08)
+              AND EXISTS (SELECT *
+                           FROM brackets
+                           WHERE    tournID = @tournID
+                           AND        round = @nextRound)
+              BEGIN
+
+                /* Give the winner credit for the "win" */
+                UPDATE tournamentPlayers
+                  SET won = won + 1
+                  WHERE tournID = @tournID
+                  AND    userID = @userID
+                  AND        td = 0
+
+                SELECT @lastError = @@error
+                IF @lastError != 0
+                BEGIN
+                  ROLLBACK TRAN
+                  RETURN @lastError
+                END
+
+                SELECT @seed = seed
+                  FROM brackets
+                  WHERE tournID   = @tournID
+                  AND     round   = @round 
+                  AND    player   = @quitterID
+
+                SELECT @lastError = @@error
+                IF @lastError != 0
+                BEGIN
+                  ROLLBACK TRAN
+                  RETURN @lastError
+                END
+
+                UPDATE brackets
+                  SET player = @quitterID
+                  WHERE tournID = @tournID
+                  AND     round = @nextRound
+                  AND      seed = @seed
+
+                SELECT @lastError = @@error
+                IF @lastError != 0
+                BEGIN
+                  ROLLBACK TRAN
+                  RETURN @lastError
+                END
+              END
+          
+              /* If there is a losers bracket, and the quitter is in the
+               * winners bracket, propagate the quitter to the losers bracket.
+               */
+              IF EXISTS (SELECT *
+                           FROM brackets
+                           WHERE    tournID = @tournID
+                           AND        round = @nextRound
+                           AND  bracketType = 1     -- next round losers bracket
+                           AND @bracketType = 0)    -- this round NOT losers brack
+              BEGIN
+
+                SELECT @seed = max(seed)
+                  FROM brackets
+                  WHERE   tournID = @tournID
+                  AND       round = @round
+                  AND     gameNum = @gameNum
+                  AND bracketType = @bracketType
+
+                SELECT @lastError = @@error
+                IF @lastError != 0
+                BEGIN
+                  ROLLBACK TRAN
+                  RETURN @lastError
+                END
+
+                UPDATE brackets
+                  SET player = @quitterID
+                  WHERE tournID = @tournID
+                  AND     round = @nextRound
+                  AND      seed = @seed
+
+                SELECT @lastError = @@error
+                IF @lastError != 0
+                BEGIN
+                  ROLLBACK TRAN
+                  RETURN @lastError
+                END
+              END
+              FETCH gameCursor INTO @gameNum, @bracketType
+            END
+            CLOSE gameCursor
+            DEALLOCATE CURSOR gameCursor
+          END
+
+          /* Punish the quitter's rating and rank (if he's still
+           * in this ladder) */
+          SELECT @notifyID = t.notifyID
+            FROM tournaments t, ladders l
+            WHERE tournID = @tournID
+            AND t.notifyID = l.notifyID
+
+          UPDATE players
+            SET rating = rating - 50
+            WHERE userID = @quitterID
+            AND gameTypeID IN (SELECT gameTypeID 
+                                 FROM ladders
+                                 WHERE notifyID = @notifyID)
+          UPDATE players
+            SET rating = 100
+            WHERE userID = @quitterID
+            AND rating < 100
+
+          IF EXISTS (SELECT * FROM ladderMembers WHERE notifyID = @notifyID AND userID = @quitterID)
+          BEGIN
+            UPDATE ladderMembers SET rank = 0, lost = lost + 1 WHERE notifyID = @notifyID AND userID = @quitterID
+          END
+
+          FETCH quitterCursor INTO @quitterID
+        END
+        CLOSE quitterCursor
+        DEALLOCATE CURSOR quitterCursor
+
+        COMMIT TRAN
+
+        /* Post a message to the participants */
+       
+        SELECT @notifyID = notifyID, @round = currentRound
+          FROM tournaments
+          WHERE tournID = @tournID
+
+        EXEC addTournamentMsg @tournID, @round, 3
+
+      END 
+      ELSE BEGIN
+        UPDATE tournaments SET status = @status WHERE tournID = @tournID
+
+        SELECT @lastError = @@error
+        IF @lastError != 0
+        BEGIN
+          ROLLBACK TRAN
+          RETURN @lastError
+        END
+        COMMIT TRAN
+      END
+
+      IF @oldStatus = 0x10 AND @accountID IS NOT NULL
+      BEGIN
+        EXEC vpusers..addAcctHistory @accountID, 63, @tournID
+      END
+
+      RETURN 0
+    END				-- In Progress
+
+    /* Finished */
+
+    IF @status = 0x04
+    BEGIN
+      IF @oldStatus != 0x20 AND @oldStatus != 0x02 AND @oldStatus != 0x40 AND @force != 1
+      BEGIN
+        ROLLBACK TRAN
+        RETURN 20004
+      END
+
+      SELECT @prize = sum(buyIn)
+        FROM tournamentPlayers
+        WHERE tournID = @tournID
+        AND td = 0
+
+      SELECT @prize2 = sum(buyIn)
+        FROM teamMates
+        WHERE tournID = @tournID
+        AND confirmed = 1
+
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+
+      IF @prize2 IS NOT NULL
+        SELECT @prize = @prize + @prize2
+
+      SELECT @prize = @prize + @addedValue
+-- select 'PRIZE', @prize
+      IF @prizeAwarded = 0	-- prevent duplicate payout
+      BEGIN
+-- select 'prize awarded', @prizeAwarded
+        /* single and double elim always have a clear winner */
+        IF @type = 0x01 OR @type = 0x02
+        BEGIN
+          SELECT @userID = player
+            FROM brackets
+            WHERE tournID = @tournID
+            AND   winner = 1
+            AND   round IN (SELECT currentRound
+				FROM tournaments WHERE tournID = @tournID)
+          IF @userID IS NOT NULL	-- extra integrity checking
+          AND @@rowcount = 1
+          BEGIN
+
+            UPDATE tournamentPlayers
+              SET prizeShare = 1.0
+              WHERE userID = @userID
+              AND td = 0
+
+            /*
+             * If this is a team game, split the prize
+             * between the winning team mates.
+             */
+            SELECT @userID2 = NULL
+            SELECT @userID2 = userID
+              FROM teamMates
+              WHERE tournID = @tournID
+              AND priUserID = @userID
+            IF @userID2 IS NOT NULL
+            BEGIN
+              IF @prize > 0
+              BEGIN
+                SELECT @prize = @prize / 2
+                EXEC @lastError = vpusers..updateUserPoints @userID, @prize
+                IF @@trancount = 0 OR @lastError != 0
+                BEGIN
+                  IF @@trancount > 0
+                    ROLLBACK TRAN
+                  RETURN @lastError
+                END
+              END
+
+              IF @prize > 0
+              BEGIN
+                EXEC @lastError = vpusers..updateUserPoints @userID2, @prize
+                IF @@trancount = 0 OR @lastError != 0
+                BEGIN
+                  IF @@trancount > 0
+                    ROLLBACK TRAN
+                  RETURN @lastError
+                END
+              END
+
+              SELECT @prize = @prize * 2
+              
+            END
+
+            /* Non-team game - one winner gets the whole prize */
+            ELSE BEGIN
+              IF @prize > 0
+              BEGIN
+                EXEC @lastError = vpusers..updateUserPoints @userID, @prize
+                IF @@trancount = 0 OR @lastError != 0
+                BEGIN
+                  IF @@trancount > 0
+                    ROLLBACK TRAN
+                  RETURN @lastError
+                END
+              END
+            END
+
+            UPDATE tournaments
+              SET prizeAwarded = 1
+              WHERE tournID = @tournID
+
+            SELECT @lastError = @@error
+            IF @lastError != 0
+            BEGIN
+              ROLLBACK TRAN
+              RETURN @lastError
+            END
+
+            /* send a message to the participants */
+            IF @prize > 0
+            BEGIN
+              SELECT @notifyID = notifyID
+                FROM tournaments
+                WHERE tournID = @tournID
+
+              EXEC addTournamentMsg @tournID, @prize, 5
+            END
+
+          END				-- winner found
+        END				-- single or double elim
+
+        /* Swiss or Round Robin -- may not have a clear winner */
+        ELSE BEGIN
+          SELECT @hiPoints = max((2*won)+tied)
+            FROM tournamentPlayers
+            WHERE tournID = @tournID
+            AND        td = 0
+          SELECT @userID = userID
+            FROM tournamentPlayers
+            WHERE tournID = @tournID
+            AND        td = 0
+            AND (2*won)+tied = @hiPoints
+          SELECT @count = @@rowcount
+-- select 'swiss, hipoints', @hiPoints, 'count', @count
+
+          IF (@count > 1)
+          BEGIN
+            SELECT @userID = NULL
+            SELECT @userID = userID
+            FROM tournamentPlayers
+            WHERE tournID = @tournID
+            AND        td = 0
+            AND prizeShare > 0
+
+            SELECT @count = @@rowcount
+            IF @count > 1
+              SELECT @userID = NULL
+          END
+-- select 'winner', @userID, @count
+
+          IF @userID IS NOT NULL	-- extra integrity checking
+          AND @count = 1		-- unambiguous winner
+          
+          BEGIN
+-- select 'prize share >0 count', @count, @userID
+
+            UPDATE tournamentPlayers
+              SET prizeShare = 1.0
+              WHERE userID = @userID
+              AND td = 0
+
+            /*
+             * If this is a team game, split the prize
+             * between the winning team mates.
+             */
+            SELECT @userID2 = NULL
+            SELECT @userID2 = userID
+              FROM teamMates
+              WHERE tournID = @tournID
+              AND priUserID = @userID
+            IF @userID2 IS NOT NULL
+            BEGIN
+              SELECT @prize = @prize / 2
+              EXEC @lastError = vpusers..updateUserPoints @userID, @prize
+              IF @@trancount = 0 OR @lastError != 0
+              BEGIN
+                IF @@trancount > 0
+                  ROLLBACK TRAN
+                RETURN @lastError
+              END
+
+              EXEC @lastError = vpusers..updateUserPoints @userID2, @prize
+              IF @@trancount = 0 OR @lastError != 0
+              BEGIN
+                IF @@trancount > 0
+                  ROLLBACK TRAN
+                RETURN @lastError
+              END
+              SELECT @prize = @prize * 2
+            END
+
+            /* Non-team game - one winner gets the whole prize */
+            ELSE BEGIN
+-- select 'award prize', @userID, @prize
+              EXEC @lastError = vpusers..updateUserPoints @userID, @prize
+              IF @@trancount = 0 OR @lastError != 0
+              BEGIN
+                IF @@trancount > 0
+                  ROLLBACK TRAN
+                RETURN @lastError
+              END
+            END
+
+            UPDATE tournaments
+              SET prizeAwarded = 1
+              WHERE tournID = @tournID
+
+            SELECT @lastError = @@error
+            IF @lastError != 0
+            BEGIN
+              ROLLBACK TRAN
+              RETURN @lastError
+            END
+
+            IF @prize > 0
+            BEGIN
+              SELECT @notifyID = notifyID
+                FROM tournaments
+                WHERE tournID = @tournID
+
+              EXEC addTournamentMsg @tournID, @prize, 5
+            END
+          END				-- unambiguous winner
+          ELSE BEGIN
+            SELECT @status = 0x40
+          END				-- ambiguous winner
+        END				-- swiss or round robin
+      END				-- prize to be awarded
+
+      UPDATE tournaments SET status = @status WHERE tournID = @tournID
+
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+
+      COMMIT TRAN
+
+      IF @accountID IS NOT NULL
+      BEGIN
+        EXEC vpusers..addAcctHistory @accountID, 64, @tournID
+      END
+
+      RETURN 0
+    END				-- Finished
+
+    /* Cancelled */
+
+    IF @status = 0x08
+    BEGIN
+      COMMIT TRAN
+
+      EXEC @lastError = delTournament @tournID, 0
+      RETURN @lastError
+    END				-- Cancelled
+
+    /* Registration closed */
+
+    IF @status = 0x10
+    BEGIN
+      IF @oldStatus != 0x01 AND @force != 1
+      BEGIN
+        ROLLBACK TRAN
+        RETURN 20005
+      END
+
+      UPDATE tournaments SET status = @status WHERE tournID = @tournID
+
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+
+      UPDATE brackets SET player = 0
+        WHERE tournID = @tournID
+        AND   round = 1
+        AND   player IS NULL
+
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+
+      COMMIT TRAN
+      RETURN 0
+    END				-- Registration closed
+
+    /* Between rounds */
+
+    IF @status = 0x20
+    BEGIN
+      IF @oldStatus != 0x02 AND @oldStatus != 0x20 AND @force != 1
+      BEGIN
+        ROLLBACK TRAN
+        RETURN 20006
+      END
+
+      UPDATE tournaments SET status = @status WHERE tournID = @tournID
+
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+
+      COMMIT TRAN
+-- select 'between rounds', @round
+
+      /* Post a message to the participants */
+       
+      IF @oldStatus != 0x20
+      BEGIN
+        SELECT @notifyID = notifyID, @round = currentRound
+          FROM tournaments
+          WHERE tournID = @tournID
+
+        /* The incRound flag is used to indicate that all
+         * scheduled games were completed
+         */
+        IF @incRound = 1
+          EXEC addTournamentMsg @tournID, @round, 6
+        ELSE
+          EXEC addTournamentMsg @tournID, @round, 1
+      END
+
+      RETURN 0
+    END				-- Registration Closed
+
+    /* Finished, pending prize award */
+
+    IF @status = 0x40
+    BEGIN
+      IF (@oldStatus != 0x02 OR @oldStatus != 0x20) AND @force != 1
+      BEGIN
+        ROLLBACK TRAN
+        RETURN 20006
+      END
+
+      UPDATE tournaments SET status = @status WHERE tournID = @tournID
+
+      SELECT @lastError = @@error
+      IF @lastError != 0
+      BEGIN
+        ROLLBACK TRAN
+        RETURN @lastError
+      END
+
+      COMMIT TRAN
+
+      RETURN 0
+    END				-- Finished, pending prize award
+    
+
+    /* None of the above */
+
+    ROLLBACK TRAN
+    RETURN 20001
+
+END
+GO

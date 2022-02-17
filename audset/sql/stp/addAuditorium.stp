@@ -1,0 +1,123 @@
+/* add a new definition of an auditorium to the database */
+/* input:  auditorium name, client name,
+           background URL, default title, show on PTG flag,
+           default welcome msg, row size, num. of rows
+   output: return value is 20001 if name is already used,
+                           20002 if URL is already used,
+                           20003 if auditorium already in persistent places table
+           0 otherwise
+*/
+CREATE PROC addAuditorium
+(
+  @auditoriumName	varchar(16),
+  @clientName		varchar(16),
+  @background		varchar(255),
+  @title		varchar(255),
+  @showOnPTG		bit,
+  @welcomeMsg1		varchar(255),
+  @welcomeMsg2		varchar(255),
+  @stageCapacity	integer,
+  @rowSize		integer,
+  @numberOfRows		integer,
+  @protected		bit = 1
+)
+AS
+BEGIN
+  
+  DECLARE @lastError int
+  DECLARE @exists    int
+
+  BEGIN TRAN
+    
+    IF EXISTS
+      ( SELECT auditoriumID
+	  FROM auditoriums
+  	  WHERE name = @auditoriumName )
+    BEGIN
+      /* name is already used */
+      ROLLBACK TRAN
+      RETURN 20001
+    END
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+    
+    IF EXISTS
+      ( SELECT auditoriumID
+	  FROM auditoriums
+  	  WHERE background = @background )
+    BEGIN
+      /* URL is already used */
+      ROLLBACK TRAN
+      RETURN 20002
+    END
+  
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+    
+    EXEC vpplaces..persistentPlaceExists @background, @exists output
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+ 
+    IF @exists = 1
+    BEGIN
+      /* URL is already used in persistentPlaces*/
+      ROLLBACK TRAN
+      RETURN 20003
+    END
+
+    INSERT auditoriums
+      ( name, background, title, 
+        welcomeMsg1, welcomeMsg2, inPlacesList, 
+        stageCapacity, rowSize, numberOfRows, client )
+      VALUES 
+      ( @auditoriumName, @background, @title, 
+        @welcomeMsg1, @welcomeMsg2, @showOnPTG, 
+        @stageCapacity, @rowSize, @numberOfRows, @clientName )
+  
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+    
+    /* add a change record, 0=new auditorium */
+    INSERT auditoriumChanges
+      VALUES(@@identity, 0)
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    /* add the auditorium to the list of persistent places */
+    EXEC vpplaces..addPersistentPlace @background, 2049, @title, @stageCapacity, @protected,
+                             @numberOfRows, @rowSize, "Row "
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+  COMMIT TRAN
+
+END
+GO

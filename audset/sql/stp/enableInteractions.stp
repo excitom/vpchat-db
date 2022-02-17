@@ -1,0 +1,14 @@
+/* enable user interactions for a specific event */
+/* input:  event id, ebnable flag (on or off)
+   output: NONE
+*/
+CREATE PROC enableInteractions
+(
+  @eventID		numeric(10,0),
+  @enableFlag		bit
+)
+AS
+  UPDATE interactionsAllowed
+    SET interactBlocked = @enableFlag
+    WHERE eventID = @eventID
+GO

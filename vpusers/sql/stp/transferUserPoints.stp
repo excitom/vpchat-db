@@ -1,0 +1,83 @@
+/* transfer reward points from one user to another
+ * input is the from userID, the to userID,
+ * and points to transfer.
+ *
+ * output: Return value - 0 - success 
+ *                        20001 - No such user
+ *                        20002 - Insufficient point balance for transfer
+ */
+IF EXISTS
+ (SELECT name FROM sysobjects WHERE name = 'transferUserPoints' AND type = 'P') 
+ DROP PROC transferUserPoints
+GO  
+CREATE PROC transferUserPoints (
+    @fromUserID	userIdentifier,
+    @toUserID	userIdentifier,
+    @points	int
+)
+AS
+BEGIN
+  DECLARE @accountID	userIdentifier
+  DECLARE @accountStatus tinyint
+  DECLARE @balance	int
+  DECLARE @lastError	int
+
+  BEGIN TRAN
+    
+    IF NOT EXISTS (SELECT * FROM users WHERE userID = @fromUserID)
+    OR NOT EXISTS (SELECT * FROM users WHERE userID = @toUserID)
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20001
+    END
+
+    SELECT @balance = points
+      FROM userPoints
+      WHERE userID = @fromUserID
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+
+    IF @balance IS NULL OR @balance < @points
+    BEGIN
+      ROLLBACK TRAN
+      RETURN 20002
+    END
+
+    UPDATE userPoints SET points = points - @points
+      WHERE userID = @fromUserID
+
+    IF EXISTS (SELECT * FROM userPoints WHERE userID = @toUserID)
+      UPDATE userPoints SET points = points + @points
+        WHERE userID = @toUserID
+    ELSE BEGIN
+      INSERT userPoints (userID, points)
+        VALUES(@toUserID, @points)
+    END
+    
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN
+      RETURN @lastError
+    END
+ 
+    SELECT nickName, 0 AS computed FROM users WHERE userID = @toUserID
+
+  COMMIT TRAN
+
+  EXEC addAcctHistory @toUserID, 80, @points
+  SELECT @points = 0 - @points
+  EXEC addAcctHistory @fromUserID, 80, @points
+
+END
+GO
+IF OBJECT_ID('dbo.transferUserPoints') IS NOT NULL
+        PRINT '<<< CREATED PROCEDURE dbo.transferUserPoints >>>'
+ELSE
+        PRINT '<<< FAILED CREATING PROCEDURE dbo.transferUserPoints >>>'
+GO

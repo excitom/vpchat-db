@@ -1,0 +1,7 @@
+DROP INDEX registration.registrationBySignonIdx
+GO
+DROP INDEX users.usersByNickNameIdx
+GO
+create index usersByNickNameIdx
+on users ( nickName, registrationMode )
+GO

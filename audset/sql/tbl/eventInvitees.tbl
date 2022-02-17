@@ -1,0 +1,8 @@
+CREATE TABLE eventInvitees
+(
+	eventID		eventIdentifier			NOT NULL,
+	inviteeName	VPuserID			NOT NULL,
+	regMode		VpRegMode			NOT NULL,
+	         PRIMARY KEY ( eventID, inviteeName )
+)
+GO

@@ -1,0 +1,21 @@
+/* Get a persistent place with a specific URL. Used by 
+   audset STP addAuditorium to avoid defining a persistent place 
+   as an auditorium */
+/* input: URL
+   output: URL of givent persistent place
+*/
+CREATE PROC persistentPlaceExists
+(
+  @URL		varchar(255),
+  @result	int output
+)
+AS
+BEGIN  
+    IF EXISTS (SELECT URL 
+          FROM persistentPlaces
+          WHERE  URL = @URL)
+      SELECT @result =  1 /* Non zero value returned if URL exists */
+    ELSE
+      SELECT @result = 0
+END
+GO

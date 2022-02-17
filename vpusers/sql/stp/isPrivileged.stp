@@ -1,0 +1,19 @@
+/* Check if a specific user has the requested privilege in the database */
+/* input: name, privilege type
+   output: @@isPrivileged parameter will be set to 1 if the user 
+   has that privilege, 0 otherwise
+*/
+CREATE PROC isPrivileged
+(
+  @@name	VPuserID,
+  @@privType privType,
+  @@isPrivileged int output
+)
+AS
+SELECT @@isPrivileged = count(*)
+  FROM users, userPrivileges
+  WHERE ( users.userID = userPrivileges.userID) AND
+        ( users.nickName = @@name ) AND
+        ( users.registrationMode = 2) AND
+        ( userPrivileges.privilegeType = @@privType)
+GO

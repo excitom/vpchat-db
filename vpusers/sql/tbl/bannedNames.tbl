@@ -1,0 +1,8 @@
+CREATE TABLE bannedNames
+(
+	nickName	VPuserID				NOT NULL
+                        constraint isPrimary primary key,
+        isBanned	bit		DEFAULT 1		NOT NULL,
+        isFiltered	bit		DEFAULT 1		NOT NULL
+)
+GO

@@ -1,0 +1,81 @@
+/*
+ * Check user penalties in the auxilliary database.
+ *
+ * This differs from checkAuxUser in that it needs to return
+ * everything in a single result set, so that it may be used in
+ * a PHP page (the Sybase function in PHP does not handle multiple
+ * result sets).
+ *
+ * Also, old kruft was stripped out.
+ *
+ */
+IF EXISTS(SELECT name FROM sysobjects WHERE name='checkAuxUser_p' AND type='P')
+ DROP PROC checkAuxUser_p
+GO
+CREATE PROC checkAuxUser_p ( @userToCheck VPuserID )
+AS
+BEGIN
+  set transaction isolation level 0
+  
+  
+  /* turn all user ID to lower case, to get case insensitive comparisons */
+  SELECT @userToCheck = lower(@userToCheck)
+  DECLARE @lastError int
+  DECLARE @diffFromGMT int
+  DECLARE @thisTime VpTime
+  DECLARE @userID userIdentifier
+
+  SELECT @diffFromGMT = gmt
+  FROM getGMT
+    
+  SELECT @lastError = @@error
+  IF @lastError != 0
+  BEGIN
+    RETURN @lastError
+  END
+      
+  IF @diffFromGMT IS NULL
+    SELECT @diffFromGMT = 0
+    
+  SELECT @thisTime = dateadd( hour, (-1) * @diffFromGMT, getdate() )
+  
+  BEGIN TRAN 
+    SELECT @userID = userID
+      FROM users
+      WHERE ( registrationMode = 3) AND 
+            ( nickName = @userToCheck )
+  
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN @lastError
+    END
+      
+    /*
+     * The user has a mode 3 entry in the aux database only if 
+     * there are penalties or privileges, so failure to find a
+     * row is not a problem here.
+     */
+    IF @userID IS NULL
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN
+    END
+
+    SELECT penaltyType
+      FROM penalties
+      WHERE ( penalties.userID = @userID ) AND
+            ( expiresOn > @thisTime )      AND
+            ( forgiven = 0 )
+      
+    SELECT @lastError = @@error
+    IF @lastError != 0
+    BEGIN
+      ROLLBACK TRAN 
+      RETURN @lastError
+    END
+  COMMIT TRAN 
+  
+END
+GO 

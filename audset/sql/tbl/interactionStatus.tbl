@@ -1,0 +1,7 @@
+CREATE TABLE interactionStatus
+(
+	statusID	numeric(2,0)			NOT NULL,
+	name		varchar(16)			NOT NULL,
+		PRIMARY KEY ( statusID )
+)
+GO

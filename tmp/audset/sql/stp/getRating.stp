@@ -1,0 +1,35 @@
+/*
+ * Get a player's rating
+ *
+ * Input: userID, gameTypeID
+ *
+ * Output: 0 = success
+ *         20000 = no such event
+ *
+ *
+ * Tom Lang 12/2004
+ */
+IF EXISTS
+ (SELECT name FROM sysobjects WHERE name = 'getRating' AND type = 'P') 
+ DROP PROC getRating
+GO  
+CREATE PROC getRating
+(
+  @userID	userIdentifier,
+  @gameTypeID	userIdentifier
+)
+AS
+BEGIN
+  IF EXISTS
+    (SELECT * FROM players WHERE userID = @userID AND gameTypeID = @gameTypeID)
+  BEGIN
+    SELECT rating
+      FROM players
+      WHERE userID = @userID
+      AND   gameTypeID = @gameTypeID
+  END
+  ELSE BEGIN
+    SELECT 1500 AS rating
+  END
+END
+GO

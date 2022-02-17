@@ -1,0 +1,4 @@
+/* index credit card information users by email */
+create index creditCardsByEmail
+on creditCards ( Ecom_billto_online_email )
+GO
